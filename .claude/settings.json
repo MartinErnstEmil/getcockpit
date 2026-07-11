@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(C:\\Users\\vorsp\\.claude\\**)",
+      "Edit(C:\\Users\\vorsp\\.claude\\**)",
+      "Write(~/.claude/**)",
+      "Edit(~/.claude/**)",
+      "Write(C:\\Users\\vorsp\\.cola\\**)",
+      "Edit(C:\\Users\\vorsp\\.cola\\**)",
+      "Write(~/.cola/**)",
+      "Edit(~/.cola/**)",
+      "Bash(claude mcp add:*)",
+      "Bash(claude mcp add-json:*)"
+    ]
+  }
+}

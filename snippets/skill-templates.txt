@@ -1,0 +1,66 @@
+# cola-snippet-separator: ===
+===
+title: Skill file frontmatter scaffold
+description: Required frontmatter shape for a Claude Code skill file (.claude/skills/<name>.md). Paste body into the new file.
+target: skill
+section: frontmatter
+priority: 10
+tags: skills, claude-code, scaffolding
+===
+---
+name: <kebab-case-name>
+description: Short imperative summary — what this skill does for Claude
+allowed-tools:
+  - Read
+  - Glob
+  - Grep
+---
+
+# <Skill Title>
+
+Use this skill when:
+- <trigger condition 1>
+- <trigger condition 2>
+
+## How to apply
+
+1. <step>
+2. <step>
+
+## Don'ts
+
+- <anti-pattern>
+===
+title: Skill file — review-pattern variant
+description: Skill scaffold for a review-style skill (multi-agent fan-out, summarize back). Adjust allowed-tools to match.
+target: skill
+section: frontmatter
+priority: 20
+tags: skills, claude-code, review
+===
+---
+name: <kebab-case-name>
+description: Run a multi-reviewer pass over <subject>; consolidate findings.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Agent
+---
+
+# <Skill Title>
+
+Triggered when the user asks for a code review on <subject>.
+
+## How to apply
+
+1. Identify scope (one commit / one PR / one file).
+2. Spawn three reviewer agents in parallel (Reuse / Quality / Efficiency).
+3. Wait for all three; consolidate findings into a single ranked list.
+4. Implement HIGH+CRITICAL fixes; defer MEDIUM unless asked.
+5. Commit fixes as one "simplify" commit.
+
+## Don'ts
+
+- Don't run reviewers sequentially — that's 3× the wall time.
+- Don't apply LOW findings without asking; they're often taste calls.

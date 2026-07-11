@@ -1,0 +1,33 @@
+---
+title: No secrets in code
+description: Env vars only, never hardcode
+target: claude_md
+section: constraints
+priority: 70
+tags: security
+---
+- NEVER commit .env files, API keys, tokens, or credentials to version control
+- Never hardcode secrets — always use environment variables
+
+---
+title: Watch for OWASP top 10
+description: Validate inputs, escape outputs, sanitize SQL
+target: claude_md
+section: constraints
+priority: 75
+tags: security
+---
+- Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection, and other OWASP top 10 vulnerabilities
+- If you notice that you wrote insecure code, immediately fix it
+
+---
+title: Confirm risky actions
+description: Don't run destructive commands without checking
+target: claude_md
+section: constraints
+priority: 80
+tags: safety, risky-actions
+---
+- For destructive operations (rm -rf, drop table, force push, kill -9), confirm with the user first
+- A user approving a risky action once does NOT mean it's approved in all contexts
+- Diagnose root causes before bypassing safety checks (--no-verify, etc.)

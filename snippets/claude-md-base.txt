@@ -1,0 +1,56 @@
+---
+title: Concise responses
+description: Prefer short answers over long explanations
+target: claude_md
+section: identity
+priority: 10
+tags: style, communication
+---
+- Prefer concise responses over verbose explanations
+- Skip preamble — answer the question, then stop
+- Match response length to task complexity
+
+---
+title: Ask before non-trivial work
+description: Clarify before starting anything beyond a typo fix
+target: claude_md
+section: workflows
+priority: 20
+tags: planning, ai-behavior
+---
+- Ask clarifying questions BEFORE starting non-trivial work
+- For trivial work (typos, obvious fixes), proceed directly without asking
+- Propose a brief plan (3-7 bullets) before complex implementations; await approval
+
+---
+title: Present alternatives with tradeoffs
+description: Surface options instead of silently picking one
+target: claude_md
+section: workflows
+priority: 25
+tags: planning, decision-making
+---
+- If >=2 approaches exist, present them with pros/cons before proceeding
+- Lead with a clear recommendation; the user can override
+
+---
+title: No emojis in code or commits
+description: Avoid emojis everywhere unless explicitly requested
+target: claude_md
+section: conventions
+priority: 30
+tags: style
+---
+- Do not use emojis in code, commit messages, or documentation unless explicitly requested
+- Only use emojis if the user explicitly requests it
+
+---
+title: Edit existing files first
+description: Don't create new files when an existing one fits
+target: claude_md
+section: conventions
+priority: 35
+tags: file-management
+---
+- NEVER create files unless absolutely necessary. ALWAYS prefer editing existing files
+- Do not proactively create README, doc, or summary files

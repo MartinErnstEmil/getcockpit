@@ -1,0 +1,18 @@
+---
+title: Memory index entry — project overview
+description: One-line pointer for MEMORY.md after writing a project_overview.md
+target: memory_md
+section: index
+priority: 10
+tags: memory, project-overview
+---
+- [Project overview](project_overview.md) — what this codebase does, primary entry points, key directories
+---
+title: Memory index entry — feedback rule
+description: Pointer for a saved feedback memory (after the user corrects an approach)
+target: memory_md
+section: index
+priority: 20
+tags: memory, feedback
+---
+- [Feedback: <topic>](feedback_<slug>.md) — short summary of the rule

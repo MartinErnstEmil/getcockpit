@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* IBM-Carbon-Skin als Tailwind-Token (User-Entscheid 08.07., Weg B1): die
+   Onepager-Token sind auf die Carbon-Farbrollen gemappt — Light = White-Theme,
+   Dark = Gray-100-Theme. Struktur/Wording/Verhalten und alle Tests bleiben;
+   nur die Haut wechselt. Carbon-Merkmale: eckige Kanten (kein Radius), Ebenen
+   über Layer-Hintergründe statt Schatten, IBM Plex, Interactive Blue 60.
+
+   Mapping (alt -> Carbon-Rolle):
+   ground=background · panel=layer-01 · surface-container=layer-hover
+   panel-2=layer-02 · ink=text-primary · ink-2=text-secondary
+   line=border-subtle · outline=border-strong · accent=interactive(blue60)
+   accent-text=link · accent-ink=text-on-color · crit=support-error
+   ok=support-success · warn=support-warning · hl=highlight(blue) */
+:root {
+  --ground: 255 255 255;
+  --panel: 244 244 244;
+  --surface-container: 232 232 232;
+  --panel-2: 224 224 224;
+  --ink: 22 22 22;
+  --ink-2: 82 82 82;
+  --line: 224 224 224;
+  --outline: 141 141 141;
+  --accent: 15 98 254;
+  --accent-text: 15 98 254;
+  --accent-ink: 255 255 255;
+  --primary-container: 237 245 255;
+  --on-primary-container: 22 22 22;
+  --secondary-container: 224 224 224;
+  --on-secondary-container: 22 22 22;
+  --ok: 36 161 72;
+  --warn: 241 194 27;
+  --crit: 218 30 40;
+  --hl: 208 226 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: 22 22 22;
+    --panel: 38 38 38;
+    --surface-container: 57 57 57;
+    --panel-2: 57 57 57;
+    --ink: 244 244 244;
+    --ink-2: 198 198 198;
+    --line: 57 57 57;
+    --outline: 111 111 111;
+    --accent: 15 98 254;
+    --accent-text: 120 169 255;
+    --accent-ink: 255 255 255;
+    --primary-container: 0 29 108;
+    --on-primary-container: 208 226 255;
+    --secondary-container: 57 57 57;
+    --on-secondary-container: 244 244 244;
+    --ok: 66 190 101;
+    --warn: 241 194 27;
+    --crit: 250 77 86;
+    --hl: 0 45 156;
+  }
+}
+
+:root[data-theme="light"] {
+  --ground: 255 255 255;
+  --panel: 244 244 244;
+  --surface-container: 232 232 232;
+  --panel-2: 224 224 224;
+  --ink: 22 22 22;
+  --ink-2: 82 82 82;
+  --line: 224 224 224;
+  --outline: 141 141 141;
+  --accent: 15 98 254;
+  --accent-text: 15 98 254;
+  --accent-ink: 255 255 255;
+  --primary-container: 237 245 255;
+  --on-primary-container: 22 22 22;
+  --secondary-container: 224 224 224;
+  --on-secondary-container: 22 22 22;
+  --ok: 36 161 72;
+  --warn: 241 194 27;
+  --crit: 218 30 40;
+  --hl: 208 226 255;
+}
+
+:root[data-theme="dark"] {
+  --ground: 22 22 22;
+  --panel: 38 38 38;
+  --surface-container: 57 57 57;
+  --panel-2: 57 57 57;
+  --ink: 244 244 244;
+  --ink-2: 198 198 198;
+  --line: 57 57 57;
+  --outline: 111 111 111;
+  --accent: 15 98 254;
+  --accent-text: 120 169 255;
+  --accent-ink: 255 255 255;
+  --primary-container: 0 29 108;
+  --on-primary-container: 208 226 255;
+  --secondary-container: 57 57 57;
+  --on-secondary-container: 244 244 244;
+  --ok: 66 190 101;
+  --warn: 241 194 27;
+  --crit: 250 77 86;
+  --hl: 0 45 156;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.43;
+  background: rgb(var(--ground));
+  color: rgb(var(--ink));
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Carbon-Bausteine (eckig, layer-basiert, kein Schatten außer Overlays). Der
+   Fokusring ist Carbons 2px-Innenkontur in Interactive-Blau. */
+@layer components {
+  .ds-card {
+    @apply border border-line bg-panel;
+  }
+  .ds-card-interactive {
+    @apply cursor-pointer border border-line bg-panel transition-colors hover:bg-surface-container focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent;
+  }
+  .ds-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-accent px-4 py-2.5 text-sm font-normal text-accent-ink transition-colors hover:bg-[#0353e9] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .ds-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-normal text-accent-text transition-colors hover:bg-accent/10 disabled:opacity-40;
+  }
+  .ds-btn-tertiary {
+    @apply inline-flex items-center justify-center gap-2 border border-accent px-4 py-2 text-sm font-normal text-accent-text transition-colors hover:bg-accent hover:text-accent-ink disabled:opacity-40;
+  }
+  .ds-tag {
+    @apply inline-flex items-center gap-1 rounded-full bg-secondary-container px-2.5 py-0.5 text-xs font-normal text-on-secondary-container;
+  }
+  .ds-field {
+    @apply w-full border-0 border-b border-outline bg-panel px-3 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-2 focus:border-b-2 focus:border-accent;
+  }
+}

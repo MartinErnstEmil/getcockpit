@@ -1,0 +1,58 @@
+---
+title: KISS / YAGNI defaults
+description: Keep it simple; build only what's needed now
+target: claude_md
+section: guidelines
+priority: 40
+tags: code-quality
+---
+- Follow KISS: keep it simple, avoid unnecessary complexity
+- Follow YAGNI: do not implement features until actually needed
+- Start with minimal functionality and verify it works before adding complexity
+
+---
+title: Surface errors loudly
+description: Never swallow errors silently
+target: claude_md
+section: guidelines
+priority: 45
+tags: errors, observability
+---
+- NEVER swallow errors silently — always surface them to the user or log them
+- Log exceptions with full context: task ID, user ID, relevant parameters
+- Every async operation must have an onError handler with user-visible feedback
+
+---
+title: Handle all UI states
+description: Loading, error, empty, success — all four
+target: claude_md
+section: guidelines
+priority: 50
+tags: ui, errors
+---
+- Always handle all four UI states: loading, error, empty, and success
+- Show loading indicator on buttons during async operations; disable while pending
+- Every list component needs an empty state — do not leave blank space
+
+---
+title: Function size limit
+description: Cap functions at 30 lines, extract helpers
+target: claude_md
+section: conventions
+priority: 55
+tags: code-quality
+---
+- Maximum function length: 30 lines; extract helpers with descriptive names
+- Mark technical debt with TODO: comments; never leave silent workarounds
+
+---
+title: No backwards-compat hacks
+description: Delete unused code; don't leave shims
+target: claude_md
+section: guidelines
+priority: 60
+tags: cleanup
+---
+- Avoid backwards-compatibility hacks — if unused, delete completely
+- Don't add error handling for scenarios that can't happen. Trust internal code guarantees
+- Don't create helpers or abstractions for one-time operations

@@ -1,0 +1,42 @@
+---
+title: Read-only command allowlist
+description: Permit common read-only shell + git commands without per-call approval. MERGE: copy the entries inside `permissions.allow` into your existing settings.json `permissions.allow` array (do NOT replace the whole permissions block — you'd lose unrelated allows).
+target: settings
+section: permissions
+priority: 30
+tags: permissions, claude-code
+---
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(npm list:*)",
+      "Bash(npm test)",
+      "Bash(npm run build)",
+      "Bash(npm run lint)"
+    ]
+  }
+}
+---
+title: Allow Playwright MCP for frontend work
+description: Permits navigation + screenshots without prompting; restrict to localhost. MERGE: append entries to your existing `permissions.allow` array (do NOT replace).
+target: settings
+section: permissions
+priority: 40
+tags: permissions, playwright, frontend
+---
+{
+  "permissions": {
+    "allow": [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_press_key"
+    ]
+  }
+}

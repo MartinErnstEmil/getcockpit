@@ -1,0 +1,314 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { getLocale, setLocale as persistLocale, type Locale } from "./prefs";
+import { setActiveLocale } from "./utils";
+
+// Mehrsprachigkeit (U3): eigener, minimaler Mechanismus (kein i18next). EN ist
+// die Basis; fehlende DE/FR-Schlüssel fallen auf EN zurück, damit nie gemischtes
+// Deutsch in einer englischen Oberfläche steht. Weitere Claude-Sprachen lassen
+// sich als zusätzliche Wörterbücher nachrüsten (LOCALES + DICTS erweitern).
+export type { Locale };
+
+export const LOCALES: Array<{ value: Locale; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "de", label: "Deutsch" },
+  { value: "fr", label: "Français" },
+];
+
+type Dict = Record<string, string>;
+
+const en: Dict = {
+  "nav.overview": "Overview",
+  "nav.briefing": "Briefing",
+  "nav.inbox": "Inbox",
+  "nav.decisions": "Decisions",
+  "nav.search": "Search",
+  "nav.report": "Report",
+  "nav.sessions": "History",
+  "nav.files": "Memory & Rules",
+  "header.systemOk": "System OK",
+  "header.systemProblem": "System issue",
+  "header.settings": "Settings",
+  "scope.project": "Project…",
+  "scope.chooseProject": "Choose a single project",
+  "scope.active": "Active",
+  "scope.all": "All",
+  "scope.days": "{n} days",
+  "scope.period": "Time period for Active",
+  "scope.group": "Project selection",
+  "scope.clear": "Clear selection",
+  "common.loading": "Loading…",
+  "overview.today": "Today",
+  "overview.today.sessions": "{n} sessions",
+  "overview.today.sessions_one": "{n} session",
+  "overview.today.decisions": "{n} decisions",
+  "overview.today.decisions_one": "{n} decision",
+  "overview.today.new": "{n} new",
+  "overview.tile.now": "Up next",
+  "overview.tile.inboxOpen": "Inbox open",
+  "overview.tile.blocker": "Blockers",
+  "overview.tile.waiting": "Waiting on you",
+  "overview.tile.decisions": "Decisions",
+  "overview.tile.projects": "Projects",
+  "overview.now.title": "Up next",
+  "overview.now.sub": "max. 5 · blockers and urgent first, then the newest",
+  "overview.now.empty": "Nothing is waiting on you.",
+  "overview.now.firstRun": "All imported — {turns} turns from {projects} projects are searchable.",
+  "overview.olderOpen": "+{n} older open tasks in the inbox",
+  "overview.olderOpen_one": "+{n} older open task in the inbox",
+  "overview.rec.title": "Recommendations",
+  "overview.rec.configFull": "{n} CLAUDE.md files are (almost) full ({names}) — full rules cost context every session.",
+  "overview.rec.configFull_one": "One CLAUDE.md is (almost) full ({names}) — full rules cost context every session.",
+  "overview.rec.configCta": "Review rules",
+  "overview.rec.drafts": "{n} saved answers have not been delivered yet.",
+  "overview.rec.drafts_one": "One saved answer has not been delivered yet.",
+  "overview.rec.draftsCta": "Open inbox",
+  "overview.rec.git": "{name}: {n} unsaved files.",
+  "overview.rec.gitCta": "Open briefing",
+  "overview.tips.title": "Did you know?",
+  "overview.tips.dismiss": "don’t show again",
+  "overview.projects.title": "Projects",
+  "overview.projects.sub": "most recently active first",
+  "overview.projects.empty": "No projects in this selection.",
+  "overview.card.running": "running",
+  "overview.card.turns": "{n} turns",
+  "overview.card.blockers": "{n} blockers",
+  "overview.card.waiting": "{n} waiting",
+  "settings.title": "Settings",
+  "settings.recording.title": "Recording & delivery",
+  "settings.recording.active": "● Hooks active — sessions are recorded, answers delivered.",
+  "settings.recording.activeNext": " Takes effect from the next Claude session.",
+  "settings.recording.disabled": "Your Claude settings file has disableAllHooks set — Cockpit records no sessions and delivers no answers, even though everything is installed.",
+  "settings.recording.enable": "Enable hooks now",
+  "settings.recording.enabling": "Enabling…",
+  "settings.theme.title": "Color scheme",
+  "settings.theme.device": "Applies to this device.",
+  "settings.theme.system": "System",
+  "settings.theme.light": "Light",
+  "settings.theme.dark": "Dark",
+  "settings.language.title": "Language",
+  "settings.language.text": "Interface language for this device. English, German and French are curated; other languages Claude speaks can be added.",
+  "settings.expert.title": "Your expertise level",
+  "settings.expert.text": "Determines how the AI assists (explanation, answer options, pros/cons, SWOT) talk to you — from jargon-free plain text to dense expert essence.",
+  "settings.about.title": "About & feedback",
+  "settings.about.version": "Cockpit v{v}",
+  "settings.about.intro": "Cockpit is still being built — your impression helps the most.",
+  "settings.about.feedback": "Give feedback",
+  "settings.about.feedbackTail": "(opens an email).",
+  "settings.about.repo": "Source code on GitHub",
+  "settings.about.license": "License",
+  "settings.about.licenseText": "Free for private and noncommercial use (PolyForm Noncommercial License 1.0.0). Any commercial use needs a commercial license — {contact}. The full terms are in {a} and {b} in the project.",
+  "common.retry": "Retry",
+};
+
+const de: Dict = {
+  "nav.overview": "Übersicht",
+  "nav.briefing": "Briefing",
+  "nav.inbox": "Inbox",
+  "nav.decisions": "Entscheidungen",
+  "nav.search": "Suche",
+  "nav.report": "Report",
+  "nav.sessions": "Verlauf",
+  "nav.files": "Gedächtnis & Regeln",
+  "header.systemOk": "System OK",
+  "header.systemProblem": "System-Problem",
+  "header.settings": "Einstellungen",
+  "scope.project": "Projekt…",
+  "scope.chooseProject": "Einzelnes Projekt wählen",
+  "scope.active": "Aktiv",
+  "scope.all": "Alle",
+  "scope.days": "{n} Tage",
+  "scope.period": "Zeitperiode für Aktiv",
+  "scope.group": "Projektauswahl",
+  "scope.clear": "Auswahl aufheben",
+  "common.loading": "Lädt…",
+  "overview.today": "Heute",
+  "overview.today.sessions": "{n} Sessions",
+  "overview.today.sessions_one": "{n} Session",
+  "overview.today.decisions": "{n} Entscheidungen",
+  "overview.today.decisions_one": "{n} Entscheidung",
+  "overview.today.new": "{n} neu",
+  "overview.tile.now": "Jetzt dran",
+  "overview.tile.inboxOpen": "Inbox offen",
+  "overview.tile.blocker": "Blocker",
+  "overview.tile.waiting": "Wartet auf dich",
+  "overview.tile.decisions": "Entscheidungen",
+  "overview.tile.projects": "Projekte",
+  "overview.now.title": "Jetzt dran",
+  "overview.now.sub": "max. 5 · Blocker und Dringendes zuerst, dann das Neueste",
+  "overview.now.empty": "Nichts wartet auf dich.",
+  "overview.now.firstRun": "Alles importiert — {turns} Turns aus {projects} Projekten durchsuchbar.",
+  "overview.olderOpen": "+{n} ältere offene Aufgaben in der Inbox",
+  "overview.olderOpen_one": "+{n} ältere offene Aufgabe in der Inbox",
+  "overview.rec.title": "Empfehlungen",
+  "overview.rec.configFull": "{n} CLAUDE.md-Dateien sind (fast) voll ({names}) — volle Regeln kosten in jeder Session Kontext.",
+  "overview.rec.configFull_one": "Eine CLAUDE.md ist (fast) voll ({names}) — volle Regeln kosten in jeder Session Kontext.",
+  "overview.rec.configCta": "Regeln prüfen",
+  "overview.rec.drafts": "{n} gespeicherte Antworten sind noch nicht zugestellt.",
+  "overview.rec.drafts_one": "Eine gespeicherte Antwort ist noch nicht zugestellt.",
+  "overview.rec.draftsCta": "Zur Inbox",
+  "overview.rec.git": "{name}: {n} ungesicherte Dateien.",
+  "overview.rec.gitCta": "Briefing öffnen",
+  "overview.tips.title": "Wusstest du?",
+  "overview.tips.dismiss": "nicht mehr zeigen",
+  "overview.projects.title": "Projekte",
+  "overview.projects.sub": "zuletzt aktiv zuerst",
+  "overview.projects.empty": "Keine Projekte in dieser Auswahl.",
+  "overview.card.running": "läuft",
+  "overview.card.turns": "{n} Turns",
+  "overview.card.blockers": "{n} Blocker",
+  "overview.card.waiting": "{n} warten",
+  "settings.title": "Einstellungen",
+  "settings.recording.title": "Aufzeichnung & Zustellung",
+  "settings.recording.active": "● Hooks aktiv — Sessions werden aufgezeichnet, Antworten zugestellt.",
+  "settings.recording.activeNext": " Gilt ab der nächsten Claude-Session.",
+  "settings.recording.disabled": "In deiner Claude-Einstellungsdatei ist disableAllHooks gesetzt — Cockpit zeichnet keine Sessions auf und stellt keine Antworten zu, obwohl alles installiert ist.",
+  "settings.recording.enable": "Hooks jetzt aktivieren",
+  "settings.recording.enabling": "Aktiviert…",
+  "settings.theme.title": "Farbschema",
+  "settings.theme.device": "Gilt für dieses Gerät.",
+  "settings.theme.system": "System",
+  "settings.theme.light": "Hell",
+  "settings.theme.dark": "Dunkel",
+  "settings.language.title": "Sprache",
+  "settings.language.text": "Sprache der Oberfläche für dieses Gerät. Englisch, Deutsch und Französisch sind kuratiert; weitere Sprachen, die Claude spricht, lassen sich ergänzen.",
+  "settings.expert.title": "Dein Expertenlevel",
+  "settings.expert.text": "Bestimmt, wie die KI-Assists (Erklärung, Antwortoptionen, Pro/Contra, SWOT) mit dir sprechen — vom jargonfreien Klartext bis zur dichten Experten-Essenz.",
+  "settings.about.title": "Über & Feedback",
+  "settings.about.version": "Cockpit v{v}",
+  "settings.about.intro": "Cockpit steckt noch im Aufbau — dein Eindruck hilft am meisten.",
+  "settings.about.feedback": "Feedback geben",
+  "settings.about.feedbackTail": "(öffnet eine E-Mail).",
+  "settings.about.repo": "Quellcode auf GitHub",
+  "settings.about.license": "Lizenz",
+  "settings.about.licenseText": "Für private und nichtkommerzielle Nutzung frei (PolyForm Noncommercial License 1.0.0). Jede kommerzielle Nutzung braucht eine kommerzielle Lizenz — {contact}. Die vollständigen Bedingungen stehen in {a} und {b} im Projekt.",
+  "common.retry": "Erneut versuchen",
+};
+
+const fr: Dict = {
+  "nav.overview": "Aperçu",
+  "nav.briefing": "Briefing",
+  "nav.inbox": "Boîte de réception",
+  "nav.decisions": "Décisions",
+  "nav.search": "Recherche",
+  "nav.report": "Rapport",
+  "nav.sessions": "Historique",
+  "nav.files": "Mémoire & règles",
+  "header.systemOk": "Système OK",
+  "header.systemProblem": "Problème système",
+  "header.settings": "Paramètres",
+  "scope.project": "Projet…",
+  "scope.chooseProject": "Choisir un seul projet",
+  "scope.active": "Actif",
+  "scope.all": "Tous",
+  "scope.days": "{n} jours",
+  "scope.period": "Période pour Actif",
+  "scope.group": "Sélection du projet",
+  "scope.clear": "Effacer la sélection",
+  "common.loading": "Chargement…",
+  "overview.today": "Aujourd’hui",
+  "overview.today.sessions": "{n} sessions",
+  "overview.today.sessions_one": "{n} session",
+  "overview.today.decisions": "{n} décisions",
+  "overview.today.decisions_one": "{n} décision",
+  "overview.today.new": "{n} nouveaux",
+  "overview.tile.now": "À faire",
+  "overview.tile.inboxOpen": "Boîte ouverte",
+  "overview.tile.blocker": "Bloqueurs",
+  "overview.tile.waiting": "En attente de vous",
+  "overview.tile.decisions": "Décisions",
+  "overview.tile.projects": "Projets",
+  "overview.now.title": "À faire",
+  "overview.now.sub": "max. 5 · bloqueurs et urgents d’abord, puis les plus récents",
+  "overview.now.empty": "Rien ne vous attend.",
+  "overview.now.firstRun": "Tout importé — {turns} tours de {projects} projets sont consultables.",
+  "overview.olderOpen": "+{n} tâches ouvertes plus anciennes dans la boîte",
+  "overview.olderOpen_one": "+{n} tâche ouverte plus ancienne dans la boîte",
+  "overview.rec.title": "Recommandations",
+  "overview.rec.configFull": "{n} fichiers CLAUDE.md sont (presque) pleins ({names}) — des règles pleines coûtent du contexte à chaque session.",
+  "overview.rec.configFull_one": "Un CLAUDE.md est (presque) plein ({names}) — des règles pleines coûtent du contexte à chaque session.",
+  "overview.rec.configCta": "Vérifier les règles",
+  "overview.rec.drafts": "{n} réponses enregistrées ne sont pas encore livrées.",
+  "overview.rec.drafts_one": "Une réponse enregistrée n’est pas encore livrée.",
+  "overview.rec.draftsCta": "Ouvrir la boîte",
+  "overview.rec.git": "{name} : {n} fichiers non sauvegardés.",
+  "overview.rec.gitCta": "Ouvrir le briefing",
+  "overview.tips.title": "Le saviez-vous ?",
+  "overview.tips.dismiss": "ne plus afficher",
+  "overview.projects.title": "Projets",
+  "overview.projects.sub": "les plus récemment actifs d’abord",
+  "overview.projects.empty": "Aucun projet dans cette sélection.",
+  "overview.card.running": "en cours",
+  "overview.card.turns": "{n} tours",
+  "overview.card.blockers": "{n} bloqueurs",
+  "overview.card.waiting": "{n} en attente",
+  "settings.title": "Paramètres",
+  "settings.recording.title": "Enregistrement & livraison",
+  "settings.recording.active": "● Hooks actifs — les sessions sont enregistrées, les réponses livrées.",
+  "settings.recording.activeNext": " Prend effet à la prochaine session Claude.",
+  "settings.recording.disabled": "Votre fichier de configuration Claude a disableAllHooks activé — Cockpit n’enregistre aucune session et ne livre aucune réponse, bien que tout soit installé.",
+  "settings.recording.enable": "Activer les hooks",
+  "settings.recording.enabling": "Activation…",
+  "settings.theme.title": "Thème de couleur",
+  "settings.theme.device": "S’applique à cet appareil.",
+  "settings.theme.system": "Système",
+  "settings.theme.light": "Clair",
+  "settings.theme.dark": "Sombre",
+  "settings.language.title": "Langue",
+  "settings.language.text": "Langue de l’interface pour cet appareil. L’anglais, l’allemand et le français sont soignés ; d’autres langues que Claude parle peuvent être ajoutées.",
+  "settings.expert.title": "Votre niveau d’expertise",
+  "settings.expert.text": "Détermine comment les assistants IA (explication, options de réponse, pour/contre, SWOT) vous parlent — du texte clair sans jargon à l’essence dense pour experts.",
+  "settings.about.title": "À propos & retour",
+  "settings.about.version": "Cockpit v{v}",
+  "settings.about.intro": "Cockpit est encore en construction — votre impression aide le plus.",
+  "settings.about.feedback": "Donner un retour",
+  "settings.about.feedbackTail": "(ouvre un e-mail).",
+  "settings.about.repo": "Code source sur GitHub",
+  "settings.about.license": "Licence",
+  "settings.about.licenseText": "Libre pour un usage privé et non commercial (PolyForm Noncommercial License 1.0.0). Tout usage commercial nécessite une licence commerciale — {contact}. Les conditions complètes sont dans {a} et {b} dans le projet.",
+  "common.retry": "Réessayer",
+};
+
+const DICTS: Record<Locale, Dict> = { en, de, fr };
+
+interface Ctx {
+  locale: Locale;
+  setLocale: (l: Locale) => void;
+}
+const LocaleContext = createContext<Ctx>({ locale: "en", setLocale: () => {} });
+
+export function LocaleProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocaleState] = useState<Locale>(() => getLocale());
+
+  // Formatierer (utils) und das <html lang> mit der aktiven Sprache versorgen.
+  useEffect(() => {
+    setActiveLocale(locale);
+    document.documentElement.lang = locale;
+  }, [locale]);
+
+  const setLocale = useCallback((l: Locale) => {
+    persistLocale(l);
+    setActiveLocale(l);
+    setLocaleState(l);
+  }, []);
+
+  return <LocaleContext.Provider value={{ locale, setLocale }}>{children}</LocaleContext.Provider>;
+}
+
+export function useLocale(): Ctx {
+  return useContext(LocaleContext);
+}
+
+// t(key, params?) — Interpolation über {name}-Platzhalter; fehlender Schlüssel
+// fällt auf EN, dann auf den Schlüssel selbst zurück (nie leerer Text).
+export function useT() {
+  const { locale } = useContext(LocaleContext);
+  return useMemo(() => {
+    return (key: string, params?: Record<string, string | number>): string => {
+      let s = DICTS[locale][key] ?? en[key] ?? key;
+      if (params) {
+        for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, String(v));
+      }
+      return s;
+    };
+  }, [locale]);
+}

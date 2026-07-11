@@ -1,0 +1,17 @@
+Cockpit (@flightdeck/cockpit)
+Copyright (c) 2026 thinkinvoice (https://thinkinvoice.com)
+
+Licensed under the PolyForm Noncommercial License 1.0.0 (LICENSE).
+Commercial licenses: LICENSE-COMMERCIAL.md.
+
+Dieses Projekt ist ein Ground-up-Rewrite (Arbeitsname cola2). Einzelne Konzepte
+und Testfall-Spezifikationen wurden aus dem Vorgängerprojekt "cola" (dev/cola)
+portiert, das unter der MIT-Lizenz stand, (c) 2026 derselbe Rechteinhaber, und
+durch diesen für dieses Projekt unter PolyForm-Noncommercial-1.0.0 relizenziert
+wurde. Portierte Module tragen einen Herkunftsvermerk im Dateikopf (ADR-012):
+  - src/paths.ts (normalizeProjectPath aus resolve-store.ts)
+  - src/transcript.ts (Defensiv-Parsing aus transcript-reader.ts)
+  - src/store.ts (Item-Datenmodell aus schema.ts)
+  - src/mcp.ts (Tool-Schemas aus mcp-server)
+  - src/settings.ts (Multiplexer-Pattern aus hooks.ts)
+  - src/hooks/entry.ts (Exit-0-Disziplin aus cola-hook-capture.cjs)

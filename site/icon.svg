@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Cockpit-Icon: kuenstlicher Horizont im REISEFLUG — das Miniaturflugzeug
+       (Fluegelbalken + Punkt) sitzt AUF der Horizontlinie, wings level.
+       (Vorher sass es unter dem Horizont und las sich als Sturzflug.)
+       Grauer Aussenring haelt die Silhouette auf hellem UND dunklem Grund. -->
+  <circle cx="16" cy="16" r="15" fill="#161616" stroke="#8d8d8d" stroke-width="1.5"/>
+  <path d="M2 16 a14 14 0 0 1 28 0 Z" fill="#0f62fe"/>
+  <!-- Fluegel = Horizont: zwei Balken links/rechts, Rumpfpunkt im Zentrum -->
+  <rect x="3.5" y="15.1" width="8.5" height="1.8" rx="0.9" fill="#ffffff"/>
+  <rect x="20" y="15.1" width="8.5" height="1.8" rx="0.9" fill="#ffffff"/>
+  <circle cx="16" cy="16" r="2.7" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cockpit — the project state that writes itself</title>
+<meta name="description" content="Every Claude Code session you ever ran, searchable in seconds. Portfolio status, standups, decision log and an agent inbox — local-first, no cloud, no embeddings.">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<style>
+  /* Carbon-inspired skin, matching the product UI: IBM Plex stack, squared
+     corners, dark shell header, Interactive Blue #0f62fe. Self-contained —
+     no CDN, works from file:// for local testing. */
+  :root {
+    --blue: #0f62fe;
+    --blue-dark: #0043ce;
+    --ink: #161616;
+    --ink-2: #525252;
+    --line: #e0e0e0;
+    --bg: #ffffff;
+    --panel: #f4f4f4;
+    --shell: #161616;
+    --shell-ink: #f4f4f4;
+    --ok: #24a148;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink); background: var(--bg); line-height: 1.55;
+  }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  header.shell {
+    background: var(--shell); color: var(--shell-ink);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header.shell .wrap { display: flex; align-items: center; height: 48px; gap: 16px; }
+  .brand { font-weight: 600; letter-spacing: 0.2px; color: var(--shell-ink); display: flex; align-items: center; gap: 8px; }
+  .brand img { width: 20px; height: 20px; }
+  .brand:hover { text-decoration: none; }
+  nav { margin-left: auto; display: flex; gap: 20px; }
+  nav a { color: #c6c6c6; font-size: 14px; }
+  nav a:hover { color: #fff; text-decoration: none; }
+
+  .hero { padding: 72px 0 56px; border-bottom: 1px solid var(--line); }
+  .hero h1 { font-size: clamp(28px, 5vw, 44px); font-weight: 600; line-height: 1.15; max-width: 21ch; }
+  .hero p.sub { margin-top: 16px; font-size: 18px; color: var(--ink-2); max-width: 58ch; }
+  .cta-row { margin-top: 28px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    display: inline-block; padding: 12px 22px; font-size: 15px; font-weight: 500;
+    background: var(--blue); color: #fff; border: 1px solid var(--blue);
+  }
+  .btn:hover { background: var(--blue-dark); border-color: var(--blue-dark); text-decoration: none; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+  .btn.ghost:hover { background: var(--panel); }
+  .install {
+    margin-top: 28px; display: inline-block; background: var(--shell); color: #f4f4f4;
+    padding: 12px 18px; font-size: 14px;
+  }
+  .install .p { color: #8d8d8d; user-select: none; }
+  .badges { margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+  .badges span::before { content: "✓ "; color: var(--ok); }
+
+  .shot { padding: 48px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .shot img { width: 100%; max-width: 1040px; display: block; border: 1px solid var(--line); }
+  .shot figcaption { font-size: 13px; color: var(--ink-2); margin-top: 10px; }
+
+  section.block { padding: 56px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 26px; font-weight: 600; margin-bottom: 28px; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+  .card { background: var(--panel); padding: 24px; border-left: 3px solid var(--blue); }
+  .card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+  .card p { font-size: 14.5px; color: var(--ink-2); }
+
+  .steps { counter-reset: step; display: grid; gap: 0; }
+  .step { display: flex; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .step:last-child { border-bottom: none; }
+  .step::before {
+    counter-increment: step; content: counter(step);
+    font-family: "IBM Plex Mono", monospace; color: var(--blue); font-size: 20px; min-width: 24px;
+  }
+  .step code { background: var(--shell); color: #f4f4f4; padding: 3px 8px; font-size: 13.5px; white-space: nowrap; }
+  .step .what { color: var(--ink-2); font-size: 14.5px; }
+
+  .privacy { background: var(--shell); color: var(--shell-ink); }
+  .privacy h2 { color: #fff; }
+  .privacy .grid3 .card { background: #262626; border-left-color: var(--ok); }
+  .privacy .card h3 { color: #fff; }
+  .privacy .card p { color: #c6c6c6; }
+
+  .pricing .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; max-width: 760px; }
+  .price-card { border: 1px solid var(--line); padding: 28px; }
+  .price-card.hot { border: 2px solid var(--blue); }
+  .price-card h3 { font-size: 16px; font-weight: 600; }
+  .price { font-size: 34px; font-weight: 600; margin: 12px 0 2px; }
+  .price small { font-size: 14px; font-weight: 400; color: var(--ink-2); }
+  .per { font-size: 13px; color: var(--ink-2); margin-bottom: 16px; }
+  .price-card ul { list-style: none; margin: 0 0 22px; }
+  .price-card li { font-size: 14.5px; padding: 5px 0; color: var(--ink-2); }
+  .price-card li::before { content: "✓ "; color: var(--ok); }
+  .freebadge { display: inline-block; background: #d0e2ff; color: var(--blue-dark); font-size: 12.5px; font-weight: 600; padding: 3px 10px; margin-bottom: 10px; }
+  .paynote { font-size: 13px; color: var(--ink-2); margin-top: 14px; max-width: 66ch; }
+
+  details { border-bottom: 1px solid var(--line); }
+  details summary { cursor: pointer; padding: 16px 0; font-weight: 500; font-size: 15.5px; list-style: none; }
+  details summary::after { content: "+"; float: right; color: var(--blue); font-size: 20px; }
+  details[open] summary::after { content: "–"; }
+  details p { padding: 0 0 16px; font-size: 14.5px; color: var(--ink-2); max-width: 75ch; }
+
+  footer { padding: 36px 0 48px; font-size: 13.5px; color: var(--ink-2); }
+  footer .cols { display: flex; gap: 32px; flex-wrap: wrap; justify-content: space-between; }
+  footer .todo { color: #da1e28; }
+
+  @media (max-width: 640px) {
+    .hero { padding: 48px 0 40px; }
+    nav a.hide-m { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="shell">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="icon.svg" alt="">Cockpit</a>
+    <nav>
+      <a href="#features" class="hide-m">Features</a>
+      <a href="#how" class="hide-m">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq" class="hide-m">FAQ</a>
+      <a href="https://github.com/MartinErnstEmil/getcockpit">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <h1>The project state that writes itself.</h1>
+    <p class="sub">
+      Every Claude Code session you ever ran — searchable in seconds. Portfolio status,
+      standups, a decision log and an inbox where Claude asks and your answers flow back
+      into the next session. All on your machine. No cloud, ever.
+    </p>
+    <div class="cta-row">
+      <a class="btn" href="#how">Get started</a>
+      <a class="btn ghost" href="https://github.com/MartinErnstEmil/getcockpit">View source</a>
+    </div>
+    <div class="install mono"><span class="p">$ </span>npm install -g getcockpit</div>
+    <div class="badges">
+      <span>Local-first</span>
+      <span>No embeddings, no phone-home</span>
+      <span>Your full history from minute one</span>
+      <span>Uninstalls without a trace</span>
+    </div>
+  </div>
+</section>
+
+<figure class="shot">
+  <div class="wrap">
+    <img src="web-ui.png" alt="Cockpit web UI: portfolio overview with project cards, inbox and decision log">
+    <figcaption>The local web UI: overview, inbox, decisions, report, history — bound to 127.0.0.1, token-protected.</figcaption>
+  </div>
+</figure>
+
+<section class="block" id="features">
+  <div class="wrap">
+    <h2>Three things Claude Code doesn't do for you</h2>
+    <div class="grid3">
+      <div class="card">
+        <h3>Remember everything</h3>
+        <p>One command imports your complete existing history — every project, every session.
+           Full-text search, BM25-ranked, sub-millisecond. "Why did we decide X?" finally has
+           an answer, retroactively.</p>
+      </div>
+      <div class="card">
+        <h3>Ask you the right way</h3>
+        <p>Agents drop questions, proposals and blockers into a persistent inbox instead of
+           burying them in chat. You answer on your terms — in the web UI, with one click.</p>
+      </div>
+      <div class="card">
+        <h3>Close the loop</h3>
+        <p>Your answers are delivered back into the next session of that project — automatically,
+           via session briefing or live injection. Decisions land in a searchable decision log
+           with supersede chains.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block privacy">
+  <div class="wrap">
+    <h2>Local-first is not a feature. It's the architecture.</h2>
+    <div class="grid3">
+      <div class="card">
+        <h3>One SQLite file</h3>
+        <p>Everything lives in ~/.cockpit/cockpit.db on your disk, with restrictive permissions.
+           No server, no account, no telemetry.</p>
+      </div>
+      <div class="card">
+        <h3>Secrets redacted at ingest</h3>
+        <p>API keys, tokens, JWTs and private keys are replaced before anything is persisted —
+           pattern- and entropy-based, best effort, verifiable in the dry-run report.</p>
+      </div>
+      <div class="card">
+        <h3>Reversible by design</h3>
+        <p>init shows a diff of your settings.json and backs it up byte-exact before touching it.
+           uninstall restores it and proves the restore. purge deletes your data. Done.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="how">
+  <div class="wrap">
+    <h2>Running in four commands</h2>
+    <div class="steps">
+      <div class="step"><div><code>npm install -g getcockpit</code><div class="what">Node ≥ 22.5 and Claude Code are the only requirements.</div></div></div>
+      <div class="step"><div><code>cockpit init</code><div class="what">Sets up capture hooks and the MCP server. Shows the settings diff, asks first, backs up.</div></div></div>
+      <div class="step"><div><code>cockpit backfill</code><div class="what">Imports your entire Claude Code history. Idempotent — run it as often as you like.</div></div></div>
+      <div class="step"><div><code>cockpit web</code><div class="what">Opens the local UI. Search your past, answer your agents, read the standup.</div></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="block pricing" id="pricing">
+  <div class="wrap">
+    <h2>Pricing</h2>
+    <div class="grid2">
+      <div class="price-card">
+        <h3>Personal</h3>
+        <div class="price">$0</div>
+        <div class="per">forever</div>
+        <ul>
+          <li>Hobby projects, learning, research</li>
+          <li>Evaluation of any length</li>
+          <li>All features included</li>
+          <li>PolyForm Noncommercial 1.0.0</li>
+        </ul>
+        <a class="btn ghost" href="#how">Install now</a>
+      </div>
+      <div class="price-card hot">
+        <div class="freebadge">First month free</div>
+        <h3>Commercial</h3>
+        <div class="price">$8.90 <small>/ month</small></div>
+        <div class="per">or $89 / year (two months free) — per Anthropic seat, net of VAT</div>
+        <ul>
+          <li>Freelance and client work</li>
+          <li>Company use, any size</li>
+          <li>Same binary, no feature gates</li>
+          <li>Priority answers from the maker</li>
+        </ul>
+        <a class="btn" href="mailto:license@thinkinvoice.com?subject=Cockpit%20commercial%20license&body=Seats%3A%20%0AName%20%2F%20company%3A%20%0AVAT%20ID%20(if%20any)%3A%20">Get a license by e-mail</a>
+      </div>
+    </div>
+    <p class="paynote">
+      Ordering is handled by e-mail and invoice from thinkinvoice — self-serve checkout is coming.
+      The software itself never asks for payment data and never phones home; licensing runs on trust
+      and an invoice, the way it should for a developer tool.
+    </p>
+  </div>
+</section>
+
+<section class="block" id="faq">
+  <div class="wrap">
+    <h2>Questions you should ask</h2>
+    <details>
+      <summary>Is this open source?</summary>
+      <p>The source is public and auditable on GitHub (source-available). The license is PolyForm
+         Noncommercial 1.0.0 — free for personal, research and evaluation use; commercial use needs
+         a paid license. That's not OSI-open-source, and we say so plainly: it's the deal that keeps
+         a one-person tool funded without ads, telemetry or a cloud lock-in.</p>
+    </details>
+    <details>
+      <summary>Where does my data go?</summary>
+      <p>Nowhere. Sessions are captured into a local SQLite database in your home directory.
+         There is no server component, no account, no telemetry. The optional AI features call
+         your locally installed <code>claude</code> binary — the same one you already use.</p>
+    </details>
+    <details>
+      <summary>What does it need to run?</summary>
+      <p>Node.js ≥ 22.5 and an installed, logged-in Claude Code. Windows, macOS and Linux.</p>
+    </details>
+    <details>
+      <summary>Can I keep a project out of the archive?</summary>
+      <p>Yes — toggle capture off per project in the settings UI, or drop a
+         <code>.cockpit/no-capture</code> file into the project. Already-captured data can be
+         purged per project with one command.</p>
+    </details>
+    <details>
+      <summary>What if I want it gone?</summary>
+      <p><code>cockpit uninstall</code> removes exactly the entries it added to your Claude Code
+         settings — and verifies the file is byte-identical to its pre-install backup.
+         <code>cockpit purge</code> deletes the database. No residue.</p>
+    </details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <strong>Cockpit</strong> — by <a href="https://thinkinvoice.com">thinkinvoice GmbH</a><br>
+        Contact: <a href="mailto:cockpit@thinkinvoice.com">cockpit@thinkinvoice.com</a>
+      </div>
+      <div>
+        <a href="https://github.com/MartinErnstEmil/getcockpit">GitHub</a> ·
+        <a href="https://github.com/MartinErnstEmil/getcockpit/blob/master/LICENSE">License</a> ·
+        <a href="https://github.com/MartinErnstEmil/getcockpit/blob/master/LICENSE-COMMERCIAL.md">Commercial terms</a>
+      </div>
+      <div>
+        <a href="impressum.html">Impressum</a> · <a href="datenschutz.html">Datenschutzerklärung</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

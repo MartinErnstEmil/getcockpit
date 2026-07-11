@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+local_cache/
+.smriti/
+.backup/
+*.log
+release/
+internal/
