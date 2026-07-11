@@ -3,9 +3,9 @@
 // die CLAUDE.md mit Zeichen-Budget und Git-Diff (neue Einträge / Streichungen
 // seit HEAD). Dazu der gehärtete Datei-Lesepfad für den internen Viewer.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { cockpitHome, normalizeProjectPath } from "./paths.js";
 import type { Store } from "./store.js";
 
@@ -161,18 +161,73 @@ export function readViewerFile(store: Store, rawPath: string, project?: string):
   if (!inRoot) return { ok: false, status: 403, error: "Pfad liegt außerhalb der erfassten Projekte" };
   const base = requested.split(sep).pop() ?? "";
   if (DENY_BASENAME.test(base)) return { ok: false, status: 403, error: "Datei ist gesperrt (Secrets)" };
-  if (!existsSync(requested) || !statSync(requested).isFile()) {
-    return { ok: false, status: 404, error: "Datei nicht gefunden" };
+  let target = requested;
+  if (!existsSync(target) || !statSync(target).isFile()) {
+    // Tolerante Auflösung: Item-Texte speichern Pfade, die veralten, sobald
+    // ein Repo umgeräumt wird — die Karten selbst bleiben aber stehen. Statt
+    // die Historie zu patchen, sucht der Viewer den Basenamen unterhalb der
+    // Anker-Wurzel; GENAU EIN Treffer wird serviert (Ambiguität bleibt 404,
+    // nie stilles Raten). Sicherheitsgrenzen unverändert: die Suche startet
+    // in einer Allowlist-Wurzel und der Deny-Check lief bereits auf dem Basenamen.
+    // Die SPEZIFISCHSTE (längste) passende Wurzel, nicht die erste: die
+    // Allowlist enthält auch übergeordnete Projekte (z. B. c:/dev neben
+    // c:/dev/repo) — von dort aus wäre die Suche teuer und fände Kopien
+    // desselben Basenamens in Nachbarprojekten (Mehrdeutigkeit -> 404).
+    const searchRoot = roots
+      .filter((r) => {
+        const rc = r.toLowerCase();
+        return reqCmp === rc || reqCmp.startsWith(rc + sep);
+      })
+      .sort((a, b) => b.length - a.length)[0];
+    const found = searchRoot ? findUniqueByBasename(searchRoot, base) : null;
+    if (!found) {
+      return { ok: false, status: 404, error: "Datei nicht gefunden (auch nicht unter neuem Ort — verschoben oder gelöscht?)" };
+    }
+    target = found;
   }
-  const size = statSync(requested).size;
+  const size = statSync(target).size;
   if (size > MAX_FILE_BYTES * 4) return { ok: false, status: 413, error: "Datei zu groß für den Viewer" };
-  const buf = readFileSync(requested);
+  const buf = readFileSync(target);
   if (buf.subarray(0, 8000).includes(0)) return { ok: false, status: 415, error: "Binärdatei — kein Text-Viewer" };
   const truncated = buf.length > MAX_FILE_BYTES;
   return {
     ok: true,
-    file: normalizeProjectPath(requested),
+    file: normalizeProjectPath(target),
     content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8"),
     truncated,
   };
+}
+
+// Begrenzte Basename-Suche unter einer Allowlist-Wurzel: liefert den Pfad nur
+// bei GENAU EINEM Treffer, sonst null (Mehrdeutigkeit darf nie stilles Raten
+// werden). Schranken halten den Worst Case klein: bekannte Bau-/Dep-Ordner
+// werden übersprungen, Tiefe und Verzeichniszahl sind gedeckelt.
+const SEARCH_SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage", "local_cache", ".smriti", ".backup"]);
+const SEARCH_MAX_DEPTH = 7;
+const SEARCH_MAX_DIRS = 2000;
+
+function findUniqueByBasename(root: string, base: string): string | null {
+  const baseCmp = base.toLowerCase();
+  const hits: string[] = [];
+  let visited = 0;
+  const walk = (dir: string, depth: number): void => {
+    if (hits.length > 1 || depth > SEARCH_MAX_DEPTH || ++visited > SEARCH_MAX_DIRS) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unlesbares Verzeichnis überspringen, kein Abbruch der Suche
+    }
+    for (const e of entries) {
+      if (hits.length > 1) return;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SEARCH_SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) walk(p, depth + 1);
+      } else if (e.isFile() && basename(e.name).toLowerCase() === baseCmp) {
+        hits.push(p);
+      }
+    }
+  };
+  walk(root, 0);
+  return hits.length === 1 ? hits[0]! : null;
 }

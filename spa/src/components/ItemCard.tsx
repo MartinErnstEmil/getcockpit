@@ -99,6 +99,14 @@ export default function ItemCard({
     : (RECOMMENDED_ASSIST[item.type] ?? "explain");
   const prioChip = item.priority === "urgent" || item.priority === "high";
   const needsAnswer = item.type === "question" || item.type === "proposal" || item.type === "blocker" || item.type === "decision";
+  // Remark-Modus (PO 11.07.): Karten OHNE Entscheidungsbedarf (Info/Ergebnis)
+  // tragen keine Entscheidungs-Sprache — das Eingabefeld heißt "Bemerkung",
+  // Entscheidungs-Assists (pro-contra/swot/alternativen) entfallen, und das
+  // (i)-Panel erklärt Bemerkung statt Entscheidung. Zustellen bleibt: eine
+  // Bemerkung erreicht die nächste Session, landet aber NIE im Entscheidungs-
+  // Log (decisionsView filtert auf question/proposal/blocker/decision).
+  const remarkMode = !needsAnswer;
+  const assists = remarkMode ? ASSISTS.filter((a) => a.kind === "explain") : ASSISTS;
 
   // Antwort-Flow v2 (Paket A): ein Entwurf ist eine gespeicherte, aber noch
   // nicht zugestellte Antwort — answer gesetzt, Status noch nicht 'answered'.
@@ -280,7 +288,7 @@ export default function ItemCard({
             <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
               <span className="ds-tag uppercase tracking-wide">KI · Einordnung</span>
               <div className="flex flex-wrap items-center gap-1.5">
-                {ASSISTS.map((a) => (
+                {assists.map((a) => (
                   <button
                     key={a.kind}
                     type="button"
@@ -339,7 +347,7 @@ export default function ItemCard({
                 <div className="mt-2 flex gap-2">
                   {assistOut.text && (
                     <button type="button" className="ds-btn-ghost !px-2" onClick={() => adoptText(assistOut.text!, assistOut.kind)}>
-                      In Antwort übernehmen
+                      {remarkMode ? "In Bemerkung übernehmen" : "In Antwort übernehmen"}
                     </button>
                   )}
                   <button type="button" className="ds-btn-ghost !px-2 !text-ink-2" onClick={() => setAssistOut(null)}>Schließen</button>
@@ -350,7 +358,7 @@ export default function ItemCard({
 
           <div className="border-l-4 border-accent bg-panel px-4 py-3">
             <div className="mb-1.5 flex items-start justify-between gap-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-accent-text">Deine Entscheidung</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-accent-text">{remarkMode ? "Bemerkung" : "Deine Entscheidung"}</label>
               {/* (i) statt der drei Info-Chips (PO 10.07.): die Chips sahen
                   aktionabel aus, waren aber nur Info. Ausklappbarer Klartext. */}
               <button
@@ -365,8 +373,17 @@ export default function ItemCard({
             </div>
             {infoOpen && (
               <div className="mb-2 border border-line bg-surface-container px-3 py-2 text-xs leading-relaxed text-ink-2">
-                <p><strong>Speichern</strong> legt deine Antwort als Entwurf ab. Der Entwurf bleibt erhalten (auch nach Reload), zählt aber noch nicht als Entscheidung und wird nicht zugestellt.</p>
-                <p className="mt-1.5"><strong>Zustellen</strong> macht die Antwort verbindlich: Sie ist sofort durchsuchbar, die nächste Claude-Session in diesem Projekt bekommt sie automatisch als Kontext, und sie erscheint dauerhaft im Entscheidungs-Log — damit nachvollziehbar bleibt, was wann entschieden wurde.</p>
+                {remarkMode ? (
+                  <>
+                    <p><strong>Speichern</strong> legt deine Bemerkung ab. Sie bleibt erhalten (auch nach Reload) und wird noch nicht weitergegeben.</p>
+                    <p className="mt-1.5"><strong>Zustellen</strong> gibt die Bemerkung an die nächste Claude-Session in diesem Projekt weiter — als Kontext, nicht als Entscheidung; im Entscheidungs-Log erscheint sie nicht.</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Speichern</strong> legt deine Antwort als Entwurf ab. Der Entwurf bleibt erhalten (auch nach Reload), zählt aber noch nicht als Entscheidung und wird nicht zugestellt.</p>
+                    <p className="mt-1.5"><strong>Zustellen</strong> macht die Antwort verbindlich: Sie ist sofort durchsuchbar, die nächste Claude-Session in diesem Projekt bekommt sie automatisch als Kontext, und sie erscheint dauerhaft im Entscheidungs-Log — damit nachvollziehbar bleibt, was wann entschieden wurde.</p>
+                  </>
+                )}
               </div>
             )}
             <textarea
@@ -379,7 +396,7 @@ export default function ItemCard({
                   if (draft.trim()) void onSave();
                 }
               }}
-              placeholder="Antwort…"
+              placeholder={remarkMode ? "Bemerkung…" : "Antwort…"}
               className="ds-field min-h-[56px] resize-y"
             />
             <div className="mt-3 flex flex-wrap items-center gap-2.5">
@@ -413,12 +430,12 @@ export default function ItemCard({
           {/* Sekundär: bewusste Ausstiege OHNE Antwort — abgesetzt vom
               Primärfluss (Speichern → Zustellen), damit die Ebene klar ist. */}
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <span className="text-xs text-ink-2">Ohne zu antworten:</span>
+            <span className="text-xs text-ink-2">{remarkMode ? "Ohne Bemerkung:" : "Ohne zu antworten:"}</span>
             <button type="button" onClick={() => onStatus("postponed", "Auf später gelegt")} className="ds-btn-ghost">
               Später (p) — zurückstellen, kommt wieder
             </button>
             <button type="button" onClick={() => onStatus("done", "Erledigt")} className="ds-btn-ghost">
-              Erledigt (e) — ohne Antwort schließen
+              {remarkMode ? "Erledigt (e) — Karte schließen" : "Erledigt (e) — ohne Antwort schließen"}
             </button>
           </div>
         </div>

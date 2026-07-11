@@ -350,4 +350,42 @@ describe("Deep-Link- und Viewer-Endpunkte (Inbox-Rework 09.07.)", () => {
     const escape = await fetch(url(`/api/file?path=../ausbruch.md&project=${encodeURIComponent(ts.dir)}`));
     expect(escape.status).toBe(403);
   });
+
+  it("/api/file löst verschobene Dateien über den eindeutigen Basenamen auf", async () => {
+    // Item-Texte speichern Pfade, die beim Umräumen eines Repos veralten —
+    // der Viewer findet die Datei am neuen Ort, solange der Basename unter
+    // der Wurzel eindeutig ist (strukturelle Lösung statt Historien-Patch).
+    ts.store.insertTurn({
+      uuid: "t-moved",
+      sessionId: "s-moved",
+      projectPath: ts.dir,
+      role: "user",
+      content: "anker",
+      timestamp: new Date().toISOString(),
+    });
+    mkdirSync(join(ts.dir, "internal", "docs"), { recursive: true });
+    writeFileSync(join(ts.dir, "internal", "docs", "verschoben.md"), "Neuer Ort", "utf8");
+    // Auch eine ÜBERGEORDNETE Wurzel in der Allowlist darf die Suche nicht
+    // kapern — gesucht wird von der spezifischsten passenden Wurzel aus.
+    ts.store.addItem({ type: "fyi", title: "eltern-wurzel", projectPath: join(ts.dir, "..") });
+
+    // Alter Pfad docs/verschoben.md existiert nicht -> eindeutiger Treffer zieht.
+    const moved = await fetch(url(`/api/file?path=docs/verschoben.md&project=${encodeURIComponent(ts.dir)}`));
+    expect(moved.status).toBe(200);
+    const body = (await moved.json()) as { file: string; content: string };
+    expect(body.content).toBe("Neuer Ort");
+    expect(body.file).toContain("internal/docs/verschoben.md");
+
+    // Mehrdeutigkeit darf NIE stilles Raten werden: zweite Datei gleichen
+    // Namens an anderem Ort -> 404 statt irgendeines Treffers.
+    mkdirSync(join(ts.dir, "kopie"), { recursive: true });
+    writeFileSync(join(ts.dir, "kopie", "verschoben.md"), "Zweiter Ort", "utf8");
+    const ambiguous = await fetch(url(`/api/file?path=docs/verschoben.md&project=${encodeURIComponent(ts.dir)}`));
+    expect(ambiguous.status).toBe(404);
+
+    // Gesperrte Basenamen bleiben gesperrt, auch über die Basename-Suche.
+    writeFileSync(join(ts.dir, "internal", "docs", "id_rsa"), "kein-schluessel", "utf8");
+    const denied = await fetch(url(`/api/file?path=docs/id_rsa&project=${encodeURIComponent(ts.dir)}`));
+    expect(denied.status).toBe(403);
+  });
 });
