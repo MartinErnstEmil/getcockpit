@@ -149,12 +149,16 @@ export default function OverviewPage() {
 
 // "Heute"-Band: leichter Tagesüberblick als Einstieg (U1). In "Aktiv"/"Alle"
 // portfolioweit, bei Einzelauswahl projektbezogen (Server filtert).
-function TodayBar({ t, today }: { t: TFn; today: { sessions: number; decisions: number; newItems: number } }) {
+function TodayBar({ t, today }: { t: TFn; today: { sessions: number; decisions: number; newItems: number; delivered: number } }) {
   const parts = [
     t(today.sessions === 1 ? "overview.today.sessions_one" : "overview.today.sessions", { n: today.sessions }),
     t(today.decisions === 1 ? "overview.today.decisions_one" : "overview.today.decisions", { n: today.decisions }),
     t("overview.today.new", { n: today.newItems }),
   ];
+  // Zustell-Transparenz: nur zeigen, wenn heute wirklich etwas abgeholt wurde.
+  if (today.delivered > 0) {
+    parts.push(t(today.delivered === 1 ? "overview.today.delivered_one" : "overview.today.delivered", { n: today.delivered }));
+  }
   return (
     <div className="mb-4 flex flex-wrap items-baseline gap-x-2 text-sm">
       <span className="font-semibold">{t("overview.today")}</span>

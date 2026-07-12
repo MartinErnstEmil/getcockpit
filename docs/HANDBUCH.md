@@ -214,7 +214,28 @@ git log refs/cockpit/wip-<Datum-Zeit>     # was steckt drin
 git cherry-pick <sha>                      # den Snapshot-Commit übernehmen
 ```
 
-## 15. Wenn etwas klemmt
+## 15. Woher weiß ich, dass meine Antwort ankommt?
+
+Wenn du eine Karte beantwortest („Zustellen"), geht die Antwort **automatisch**
+an die nächste Claude-Session dieses Projekts — auf einem von drei Wegen:
+
+- **beim Session-Start:** die nächste startende Session bekommt sie im Briefing.
+- **in eine laufende Session:** tippst du dort etwas, wird sie mit eingespielt.
+- **vom Agenten abgeholt:** wartet der Agent aktiv (MCP `pickup_answers`).
+
+**Quittung auf der Karte:** Jede beantwortete Karte (Inbox und Entscheidungs-
+Log) zeigt darunter den Zustellzustand — „Wartet auf Abholung · seit …" bzw.
+„Zugestellt · … · <Weg>" mit einem Link auf die Session im Verlauf. Bleibt eine
+Antwort über 2 h liegen, erinnert die Übersicht daran; nach 24 h bietet die
+Karte einen **Kopier-Knopf** als Fallback (Antwort ins CLI-Fenster einfügen).
+
+**Läuft die Kette überhaupt?** In den Einstellungen beweist **„Zustellung
+testen"** die Kette Hook → Abholung → Injektion auf deiner Maschine — isoliert
+gegen eine Wegwerf-Datenbank, ohne echte Daten anzufassen. Rot mit Klartext-
+Grund heißt meist: `cockpit init` neu ausführen (Hook-Bundle veraltet).
+`cockpit doctor` führt denselben Test als Check „Zustell-Kette end-to-end".
+
+## 16. Wenn etwas klemmt
 
 1. `cockpit doctor` — nennt zu jedem Problem den Fix.
 2. **KI-Boxen zeigen Fehler/Timeout:** das `claude`-Kommando ist nicht

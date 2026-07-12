@@ -79,7 +79,7 @@ export interface StatusResponse {
   // Phase 2: welche Onboarding-Hinweise dauerhaft ausgeblendet sind.
   dismissedHints: string[];
   // U1: "Heute"-Band und verdeckte Alt-Last der Übersicht.
-  today: { sessions: number; decisions: number; newItems: number };
+  today: { sessions: number; decisions: number; newItems: number; delivered: number };
   olderOpen: number;
   // Zustell-Transparenz: beantwortete Antworten, seit >2 h nicht abgeholt.
   undeliveredAnswers: number;

@@ -62,7 +62,7 @@ export interface PortfolioView {
   // Tages-Zusammenfassung (U1): reine SQL-Ableitung fürs "Heute"-Band der
   // Übersicht. Sessions ohne Assist-Spawns, heute gefallene Entscheidungen,
   // heute neu eingetroffene Items.
-  today: { sessions: number; decisions: number; newItems: number };
+  today: { sessions: number; decisions: number; newItems: number; delivered: number };
   // Offene Items älter als 7 Tage (U1): "Jetzt dran" zeigt das Neueste zuerst,
   // dieser Zähler macht die verdeckte Alt-Last ehrlich sichtbar (Link in die Inbox).
   olderOpen: number;
@@ -245,7 +245,7 @@ function todayCounts(
   store: Store,
   now: number,
   projectFilter: string | null,
-): { sessions: number; decisions: number; newItems: number } {
+): { sessions: number; decisions: number; newItems: number; delivered: number } {
   const db = store.rawDb();
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
@@ -267,7 +267,17 @@ function todayCounts(
       .prepare(`SELECT COUNT(*) AS n FROM items WHERE created_at >= ? ${pCond}`)
       .get(startIso, ...pParams) as { n: number }
   ).n;
-  return { sessions: countTodaySessions(store, startIso, projectFilter), decisions, newItems };
+  // Heute abgeholte Antworten (Zustell-Transparenz): DISTINCT itemId, damit die
+  // dokumentierte Parallel-Kante (zwei Events je Item) nicht doppelt zählt.
+  const delivered = (
+    db
+      .prepare(
+        `SELECT COUNT(DISTINCT json_extract(payload_json, '$.itemId')) AS n FROM events
+          WHERE event_type = 'answer_delivered' AND created_at >= ? ${pCond}`,
+      )
+      .get(startIso, ...pParams) as { n: number }
+  ).n;
+  return { sessions: countTodaySessions(store, startIso, projectFilter), decisions, newItems, delivered };
 }
 
 // Distinkte Sessions von heute ohne interne Assist-Spawns (isInternalSession
