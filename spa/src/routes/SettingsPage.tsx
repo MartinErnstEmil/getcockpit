@@ -19,12 +19,13 @@ import {
   useProjects,
   useSetCapture,
   useSetArchived,
+  useSetGitMode,
   useDeleteProject,
   useClaudeMdCheck,
 } from "@/api/queries";
 import { cn, shortName, dayMonth } from "@/lib/utils";
 import { useT, useLocale, LOCALES } from "@/lib/i18n";
-import type { BudgetCheckResult, ProjectAdmin } from "@/api/types";
+import { GIT_MODES, type BudgetCheckResult, type ProjectAdmin } from "@/api/types";
 
 const THEMES: Array<{ value: Theme; labelKey: string }> = [
   { value: "system", labelKey: "settings.theme.system" },
@@ -197,12 +198,14 @@ function AboutSection() {
 // Kacheln/Badges verschwinden, Daten bleiben) und Löschen (purge, doppelte
 // Bestätigung). Archivierte Projekte bleiben HIER sichtbar und umkehrbar.
 function ProjectsSection() {
+  const t = useT();
   const q = useProjects();
   const setCapture = useSetCapture();
   const setArchived = useSetArchived();
+  const setGitMode = useSetGitMode();
   const del = useDeleteProject();
-  const busy = setCapture.isPending || setArchived.isPending || del.isPending;
-  const mutErr = setCapture.error ?? setArchived.error ?? del.error;
+  const busy = setCapture.isPending || setArchived.isPending || setGitMode.isPending || del.isPending;
+  const mutErr = setCapture.error ?? setArchived.error ?? setGitMode.error ?? del.error;
 
   const onDelete = (p: ProjectAdmin) => {
     const name = shortName(p.projectPath);
@@ -217,6 +220,14 @@ function ProjectsSection() {
       <p className="mb-2 max-w-[60ch] text-xs text-ink-2">
         Aufzeichnen aus stoppt neue Sessions dieses Projekts. Archivieren blendet es aus Auswahl, Kacheln und Badges aus — Suche und Verlauf behalten die Daten, umkehrbar. Löschen entfernt die Daten unwiderruflich.
       </p>
+      <details className="mb-2 max-w-[60ch] text-xs text-ink-2">
+        <summary className="cursor-pointer select-none">ⓘ {t("settings.git.info")}</summary>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          <li>{t("settings.git.explain.manual")}</li>
+          <li>{t("settings.git.explain.advisory")}</li>
+          <li>{t("settings.git.explain.auto")}</li>
+        </ul>
+      </details>
       {mutErr && (
         <p className="mb-2 text-xs text-crit">
           {mutErr instanceof Error ? mutErr.message : String(mutErr)} — Erneut versuchen.
@@ -245,6 +256,20 @@ function ProjectsSection() {
                   {p.lastActivity ? `zuletzt ${dayMonth(p.lastActivity)}` : "keine Aktivität"} · {p.turns} Wortmeldungen · {p.openItems} offen
                 </div>
               </div>
+              <label className="flex items-center gap-1.5 text-xs text-ink-2">
+                {t("settings.git.title")}
+                <select
+                  value={p.gitMode}
+                  disabled={busy}
+                  aria-label={t("settings.git.aria")}
+                  onChange={(e) => setGitMode.mutate({ project: p.projectPath, mode: e.target.value })}
+                  className="ds-field !w-auto !py-1 text-xs"
+                >
+                  {GIT_MODES.map((m) => (
+                    <option key={m} value={m}>{t(`settings.git.mode.${m}`)}</option>
+                  ))}
+                </select>
+              </label>
               <label className="flex items-center gap-1.5 text-xs text-ink-2">
                 <input
                   type="checkbox"

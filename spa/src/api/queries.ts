@@ -337,6 +337,10 @@ export function useSetArchived() {
   return useProjectMutation<{ project: string; archived: boolean }>("/api/project-archive");
 }
 
+export function useSetGitMode() {
+  return useProjectMutation<{ project: string; mode: string }>("/api/project-gitmode");
+}
+
 export function useDeleteProject() {
   return useProjectMutation<{ project: string; confirm: boolean }>("/api/project-delete");
 }

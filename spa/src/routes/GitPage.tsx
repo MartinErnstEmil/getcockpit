@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { useGitStates, useGitRefresh } from "@/api/queries";
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
 import { ageText, shortName } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import type { AheadBehind } from "@/api/types";
 
 // /git — Git-Transparenz (PO 11.07.): eine Zeile je Projekt aus dem
@@ -11,6 +13,7 @@ import type { AheadBehind } from "@/api/types";
 // aktualisierbar. Stufe "advisory" des Git-Konzepts: Cockpit ZEIGT und
 // EMPFIEHLT — es führt selbst nie git-Kommandos aus, die den Stand ändern.
 export default function GitPage() {
+  const t = useT();
   const q = useGitStates();
   const refresh = useGitRefresh();
   // ahead/behind ist ein Live-Wert (kommt nur vom Refresh, nie aus dem Cache).
@@ -60,6 +63,11 @@ export default function GitPage() {
                   <span className={s.dirtyFiles > 0 ? "text-warn" : "text-ink-2"}>
                     {s.dirtyFiles > 0 ? `${s.dirtyFiles} ungesichert` : "sauber"}
                   </span>
+                  {/* Modus-Chip: nur Anzeige; geschaltet wird in den Settings.
+                      Für mode='auto' füllt G4 hier zusätzlich "letzter Snapshot". */}
+                  <Link to="/settings" className="ds-tag hover:underline" title={t("git.modeChip.tip")}>
+                    {t(`settings.git.mode.${s.gitMode}`)}
+                  </Link>
                   {ab !== undefined && (
                     <span className="font-mono text-xs text-ink-2">
                       {ab === null ? "kein Upstream" : `↑${ab.ahead} ↓${ab.behind}`}

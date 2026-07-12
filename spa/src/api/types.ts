@@ -54,10 +54,16 @@ export interface ProjectAdmin {
   projectPath: string;
   captureEnabled: boolean;
   archived: boolean;
+  // Git-Modi (Migration v4): manual | advisory | auto. Default advisory.
+  gitMode: string;
   lastActivity: string | null;
   turns: number;
   openItems: number;
 }
+
+// Git-Modi je Projekt — Allowlist gespiegelt aus store.ts GIT_MODES.
+export const GIT_MODES = ["manual", "advisory", "auto"] as const;
+export type GitMode = (typeof GIT_MODES)[number];
 
 export interface StatusResponse {
   projects: ProjectStatus[];
@@ -289,6 +295,8 @@ export interface GitStateRow {
   dirtyFiles: number;
   lastCommitAt: string | null;
   recentCommits: Array<{ sha: string; at: string; subject: string }>;
+  // Git-Modus je Projekt (Anzeige-Chip; geschaltet wird nur in den Settings).
+  gitMode: string;
   updatedAt: string;
 }
 
