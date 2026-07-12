@@ -260,4 +260,16 @@ describe("decisionsView Lücke 1 (beantwortete Vorschläge/Blocker sind Entschei
     expect(titles).toContain("Blocker Y");
     expect(titles).not.toContain("Offen Z");
   });
+
+  it("done-Items mit Antwort erscheinen als Entscheidung, nicht als Entwurf (PO 12.07.)", () => {
+    // Muster des Stale-Aufräumens: Item wird mit Begründung direkt auf done geschlossen.
+    const closed = ts.store.addItem({ type: "proposal", title: "Erledigt mit Antwort", projectPath: "c:/dev/d1" });
+    ts.store.updateItem(closed.id, { answer: "so umgesetzt", status: "done" });
+
+    const entry = decisionsView(ts.store, { project: "c:/dev/d1" }).find(
+      (d) => d.title === "Erledigt mit Antwort",
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.draft).toBe(false);
+  });
 });

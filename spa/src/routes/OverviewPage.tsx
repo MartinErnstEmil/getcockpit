@@ -61,7 +61,9 @@ export default function OverviewPage() {
     fullConfigs: (configQ.data?.entries ?? []).filter(
       (e) => e.exists && keep(e.projectPath || null) && e.remaining < e.budget * 0.1,
     ),
-    draftCount: inScopeItems.filter((i) => i.answer && i.status !== "answered").length,
+    // done-mit-Antwort ist eine getroffene Entscheidung, kein Entwurf —
+    // dieselbe Semantik wie decisionsView (PO 12.07., i-e2fcaaa932).
+    draftCount: inScopeItems.filter((i) => i.answer && i.status !== "answered" && i.status !== "done").length,
     // Advisory-Stufe des Git-Konzepts: ALLE Projekte der Auswahl mit
     // ungesicherter Arbeit zählen (nicht nur das schlimmste ab 10) — die
     // Empfehlung führt in den Git-Tab, wo je Repo Details + Live-Refresh stehen.

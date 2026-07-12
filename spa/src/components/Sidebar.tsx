@@ -1,5 +1,6 @@
+import type { ComponentType } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Inbox, GitBranch, GitCommitHorizontal, Search, History, FileText, BookOpen, ClipboardList } from "lucide-react";
+import { LayoutDashboard, Inbox, GitBranch, Search, History, FileText, BookOpen, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useScope } from "@/lib/useScope";
@@ -7,9 +8,24 @@ import { isActionable } from "@/lib/scope";
 import { useScopedStatus, useScopedItems } from "@/lib/useScopedData";
 import { useDecisions } from "@/api/queries";
 
+// Offizielles Git-Logo (Jason Long, CC BY 3.0, git-scm.com/community/logos),
+// schwarze Mono-Variante als Git-Tab-Icon (PO 12.07.). fill=currentColor statt
+// des Original-#100f0d, damit Hover/Aktiv/Dark-Theme wie bei den Lucide-Icons
+// greifen; Pfad und rotate(-45) sind unverändert aus Git-Icon-Black.svg.
+function GitLogoIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 78 78" fill="currentColor" aria-hidden="true" className={className}>
+      <path
+        transform="translate(10 10) rotate(-45 29 29)"
+        d="M5,58c-2.76142,0 -5,-2.23858 -5,-5v-48c0,-2.76142 2.23858,-5 5,-5h33v12.54404c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,0.73514 0.13221,1.43941 0.37415,2.09031l-15.28384,15.28384c-0.6509,-0.24194 -1.35517,-0.37415 -2.09031,-0.37415c-3.31371,0 -6,2.68629 -6,6c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-0.73514 -0.13221,-1.43941 -0.37415,-2.09031l14.87415,-14.87415l0,11.50851c-2.06553,0.94801 -3.5,3.03446 -3.5,5.45596c0,3.31371 2.68629,6 6,6c3.31371,0 6,-2.68629 6,-6c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.08808c2.06553,-0.94801 3.5,-3.03446 3.5,-5.45596c0,-2.42149 -1.43447,-4.50795 -3.5,-5.45596l0,-12.54404h10c2.76142,0 5,2.23858 5,5v48c0,2.76142 -2.23858,5 -5,5z"
+      />
+    </svg>
+  );
+}
+
 // UI-Wörter bindend (PLAN-PRD §4): "Verlauf" (nie raw/turns), "Gedächtnis &
 // Regeln" (nie config/memory). Labels über i18n (U3). Keine Composer-Seite hier.
-const NAV: Array<{ to: string; key: string; Icon: typeof Inbox; badge?: "inbox" | "decisions" }> = [
+const NAV: Array<{ to: string; key: string; Icon: ComponentType<{ className?: string }>; badge?: "inbox" | "decisions" }> = [
   { to: "/overview", key: "nav.overview", Icon: LayoutDashboard },
   { to: "/briefing", key: "nav.briefing", Icon: ClipboardList },
   { to: "/inbox", key: "nav.inbox", Icon: Inbox, badge: "inbox" },
@@ -17,7 +33,7 @@ const NAV: Array<{ to: string; key: string; Icon: typeof Inbox; badge?: "inbox" 
   { to: "/search", key: "nav.search", Icon: Search },
   { to: "/report", key: "nav.report", Icon: BookOpen },
   { to: "/sessions", key: "nav.sessions", Icon: History },
-  { to: "/git", key: "nav.git", Icon: GitCommitHorizontal },
+  { to: "/git", key: "nav.git", Icon: GitLogoIcon },
   { to: "/files", key: "nav.files", Icon: FileText },
 ];
 

@@ -323,7 +323,7 @@ export interface DecisionEntry {
   replacesId: string | null;
   supersededById: string | null;
   // U2: gespeicherter, aber noch nicht zugestellter Entwurf (answer gesetzt,
-  // status != 'answered') — im Log als "noch nicht zugestellt" markiert.
+  // status weder 'answered' noch 'done') — im Log "noch nicht zugestellt".
   draft: boolean;
   // U2: aus dem Default-Log genommen ('archived'-Tag), nur unter all=1 sichtbar.
   archived: boolean;
@@ -336,14 +336,16 @@ export function decisionsView(
   const db = store.rawDb();
   // Beantwortete Vorschläge/Blocker SIND Entscheidungen (Lücke 1, Review
   // 09.07.; live getroffen am 10.07.: PO fand seine gespeicherte
-  // Vorschlags-Antwort nicht im Log).
-  // Dritte Klausel (U2): Entwürfe — answer gesetzt, aber noch nicht zugestellt
-  // (status != 'answered'). Sie erscheinen als "noch nicht zugestellt" im Log,
-  // damit heute begonnene, aber nicht abgeschickte Antworten sichtbar bleiben.
+  // Vorschlags-Antwort nicht im Log). 'done' zählt wie 'answered' (PO 12.07.,
+  // i-e2fcaaa932): als erledigt geschlossene Items mit Antwort sind getroffene
+  // Entscheidungen — vorher erschienen sie fälschlich als Entwurf.
+  // Dritte Klausel (U2): Entwürfe — answer gesetzt, aber weder zugestellt noch
+  // abgeschlossen. Sie erscheinen als "noch nicht zugestellt" im Log, damit
+  // heute begonnene, aber nicht abgeschickte Antworten sichtbar bleiben.
   const conds = [
     `(type = 'decision'
-      OR (type IN ('question', 'proposal', 'blocker') AND status = 'answered' AND answer IS NOT NULL)
-      OR (type IN ('question', 'proposal', 'blocker') AND status != 'answered' AND answer IS NOT NULL AND answer != ''))`,
+      OR (type IN ('question', 'proposal', 'blocker') AND status IN ('answered', 'done') AND answer IS NOT NULL)
+      OR (type IN ('question', 'proposal', 'blocker') AND status NOT IN ('answered', 'done') AND answer IS NOT NULL AND answer != ''))`,
   ];
   const params: unknown[] = [];
   if (opts.project) {
@@ -396,7 +398,7 @@ export function decisionsView(
       createdAt: r.created_at,
       replacesId: r.parent_id,
       supersededById: supersededBy.get(r.uuid) ?? null,
-      draft: r.type !== "decision" && r.status !== "answered" && !!r.answer,
+      draft: r.type !== "decision" && r.status !== "answered" && r.status !== "done" && !!r.answer,
       archived: tags.includes("archived"),
     };
   });
