@@ -185,7 +185,36 @@ Experte) — das Level bestimmt die Tonlage aller KI-Antworten.
 | `cockpit purge [--project X] --yes` | Daten löschen |
 | `cockpit web [--port]` | Oberfläche starten |
 
-## 14. Wenn etwas klemmt
+## 14. Git-Modi (je Projekt)
+
+Der Git-Tab zeigt den Stand aller erfassten Repos. Wie laut Cockpit dabei
+mahnt, stellst du je Projekt in **Einstellungen → Projekte** über den
+Git-Schalter ein (Standard: **beratend** — wie bisher):
+
+- **manuell** — nur anzeigen: Branch, ungesicherte Dateien und Commits bleiben
+  sichtbar, aber keine Empfehlungen in Übersicht, Git-Tab oder Session-Prompt.
+- **beratend** — zusätzlich Empfehlungen (Commit fällig, n nicht gepusht) in der
+  Übersicht, im Git-Tab und als Regel im Session-Prompt.
+- **auto** — zusätzlich ein **Sicherungs-Snapshot nach jeder Session**.
+
+**auto-Leitplanken:** Der Snapshot legt einen Commit unter einem eigenen Ref
+(`refs/cockpit/wip-<Datum-Zeit>`) ab — er berührt **nie** deinen Branch, HEAD,
+Index oder Worktree, pusht nie und benutzt nie `--force`. Aufbewahrt werden die
+letzten 20 Snapshots je Repo. `git branch` bleibt sauber (kein Branch-Namespace).
+
+**Roh-Stand-Hinweis:** Ein Snapshot enthält den **ungeschwärzten** Arbeitsstand
+(es ist git, nicht die Cockpit-Datenbank — die Redaction greift nur beim
+Erfassen in die DB). Wer Secrets im Worktree hat, sichert sie damit mit.
+
+**Wiederherstellen:** Snapshots findest du über den Git-Tab oder
+`git for-each-ref refs/cockpit/`. Einen Stand ansehen bzw. zurückholen:
+
+```
+git log refs/cockpit/wip-<Datum-Zeit>     # was steckt drin
+git cherry-pick <sha>                      # den Snapshot-Commit übernehmen
+```
+
+## 15. Wenn etwas klemmt
 
 1. `cockpit doctor` — nennt zu jedem Problem den Fix.
 2. **KI-Boxen zeigen Fehler/Timeout:** das `claude`-Kommando ist nicht
