@@ -8,6 +8,7 @@ import { useBrief, useDecisions } from "@/api/queries";
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
 import { ageText, shortName } from "@/lib/utils";
+import { sessionPromptGitRule } from "@/lib/gitmode";
 import type { StatusBrief } from "@/api/types";
 
 // /briefing — Status-Zusammenfassung eines Projekts (Ziel des Projektkarten-
@@ -93,6 +94,28 @@ function ProjectBriefing({ project, keep }: { project: string; keep: (p: string 
   const [promptCopied, setPromptCopied] = useState(false);
 
   function buildSessionPrompt(): string {
+    // Git-Regel folgt dem Modus des Projekts (manual = weglassen); die
+    // übrigen Regeln werden dynamisch nummeriert, damit das Weglassen keine
+    // Lücke reißt. Fehlender Modus = 'advisory'.
+    const gitRule = sessionPromptGitRule(p?.gitMode ?? "advisory");
+    const rules = [
+      "Gates nach JEDEM Paket: Tests + Typecheck (und Build, wo vorhanden) —\n" +
+        "   keine Gates aufweichen, keine .skip.",
+      "/simplify an nützlichen Stellen: nach jedem inhaltlich abgeschlossenen\n" +
+        "   Paket einen /simplify-Lauf über den Paket-Diff (Reuse, Vereinfachung,\n" +
+        "   Altitude) und die Findings direkt anwenden, BEVOR du weitermachst.",
+      ...(gitRule ? [gitRule] : []),
+      "Cockpit ist dein Kanal zum Menschen (MCP-Server \"cockpit\"):\n" +
+        "   - Fragen, Blocker und Vorschläge sofort als add_item ablegen (Typ\n" +
+        "     präzise, anchor auf Datei:Zeile) — nie im Chat-Text begraben.\n" +
+        "   - Vor Architektur-Entscheidungen: search_decisions.\n" +
+        "   - Wartest du auf eine Antwort: pickup_answers vor dem nächsten Schritt.",
+      "Session-Abschluss (Pflicht, bevor du endest):\n" +
+        "   - EIN result-Item: was getan, was offen, Gates-Stand.\n" +
+        "   - Learnings/Erkenntnisse als je ein kurzes fyi-Item.\n" +
+        "   - Offene Fragen als question-Items.\n" +
+        "   - Repo-Doku aktualisieren, wo die Arbeit sie veraltet hat.",
+    ];
     return [
       `Du arbeitest autonom im Projekt ${project}.`,
       "",
@@ -106,25 +129,7 @@ function ProjectBriefing({ project, keep }: { project: string; keep: (p: string 
       "abgeschlossene Pakete; nach jedem Paket alle Gates.",
       "",
       "## Arbeitsregeln (bindend)",
-      "1. Gates nach JEDEM Paket: Tests + Typecheck (und Build, wo vorhanden) —",
-      "   keine Gates aufweichen, keine .skip.",
-      "2. /simplify an nützlichen Stellen: nach jedem inhaltlich abgeschlossenen",
-      "   Paket einen /simplify-Lauf über den Paket-Diff (Reuse, Vereinfachung,",
-      "   Altitude) und die Findings direkt anwenden, BEVOR du weitermachst.",
-      "3. Git-Disziplin: EIN kleiner, in sich abgeschlossener Commit je Paket",
-      "   (aussagekräftige Message, WARUM vor WAS) — nie mit roten Gates",
-      "   committen. Am Session-Ende: push, wenn alle Gates grün sind; sonst",
-      "   NICHT pushen und stattdessen ein blocker-Item mit dem Grund anlegen.",
-      "4. Cockpit ist dein Kanal zum Menschen (MCP-Server \"cockpit\"):",
-      "   - Fragen, Blocker und Vorschläge sofort als add_item ablegen (Typ",
-      "     präzise, anchor auf Datei:Zeile) — nie im Chat-Text begraben.",
-      "   - Vor Architektur-Entscheidungen: search_decisions.",
-      "   - Wartest du auf eine Antwort: pickup_answers vor dem nächsten Schritt.",
-      "5. Session-Abschluss (Pflicht, bevor du endest):",
-      "   - EIN result-Item: was getan, was offen, Gates-Stand.",
-      "   - Learnings/Erkenntnisse als je ein kurzes fyi-Item.",
-      "   - Offene Fragen als question-Items.",
-      "   - Repo-Doku aktualisieren, wo die Arbeit sie veraltet hat.",
+      ...rules.map((r, i) => `${i + 1}. ${r}`),
     ].join("\n");
   }
 

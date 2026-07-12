@@ -32,6 +32,9 @@ export interface ProjectStatus {
   waitingOnHuman: number;
   latestDecisions: Array<{ id: string; title: string; at: string }>;
   git: GitDelta | null;
+  // Git-Modus je Projekt (Migration v4): steuert, ob Git-Empfehlungen in
+  // Übersicht/Session-Prompt auftauchen. Fehlender Eintrag = 'advisory'.
+  gitMode: string;
   // Synthetische Global-Zeile (Auflage P1): Aggregat der globalen Items
   // (project_path IS NULL). In JEDEM Scope "in Auswahl", aber keine echte
   // Projektkarte — die UI zählt sie nicht als Projekt.
@@ -164,6 +167,9 @@ export function portfolioView(store: Store, opts: { project?: string; now?: numb
     ]),
   );
 
+  // Git-Modus je Projekt (Projekte ohne project_settings-Eintrag = 'advisory').
+  const gitModes = new Map(store.listProjectSettings().map((s) => [s.projectPath, s.gitMode]));
+
   const projects: ProjectStatus[] = turnAgg
     .filter((t) => (!projectFilter || t.project_path === projectFilter) && !archived.has(t.project_path))
     .map((t) => {
@@ -182,6 +188,7 @@ export function portfolioView(store: Store, opts: { project?: string; now?: numb
         waitingOnHuman: items?.waiting ?? 0,
         latestDecisions: decisionsByProject.get(t.project_path) ?? [],
         git: gitByProject.get(t.project_path) ?? null,
+        gitMode: gitModes.get(t.project_path) ?? "advisory",
       };
     })
     .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
@@ -217,6 +224,7 @@ export function portfolioView(store: Store, opts: { project?: string; now?: numb
     waitingOnHuman: Number(globalItems?.waiting ?? 0),
     latestDecisions: decisionsByProject.get("") ?? [],
     git: null,
+    gitMode: "advisory",
     global: true,
   });
 

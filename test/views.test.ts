@@ -143,6 +143,10 @@ describe("portfolioView (PRD F10)", () => {
     expect(v.projects[0]!.git?.branch).toBe("master");
     expect(v.projects[0]!.git?.dirtyFiles).toBe(2);
     expect(v.projects[0]!.git?.recentCommits[0]!.subject).toBe("feat: x");
+    // Git-Modi (v4): ohne Eintrag advisory, danach folgt gitMode dem Store.
+    expect(v.projects[0]!.gitMode).toBe("advisory");
+    ts.store.setGitMode("c:/dev/p", "manual");
+    expect(portfolioView(ts.store, { now: NOW }).projects[0]!.gitMode).toBe("manual");
   });
 
   it("project filter narrows projects and next actions", () => {

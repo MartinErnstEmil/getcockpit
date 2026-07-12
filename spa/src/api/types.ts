@@ -22,6 +22,8 @@ export interface ProjectStatus {
   waitingOnHuman: number;
   latestDecisions: Array<{ id: string; title: string; at: string }>;
   git: GitDelta | null;
+  // Git-Modus je Projekt (Migration v4): manual | advisory | auto.
+  gitMode: string;
   // Synthetische Global-Zeile (Auflage P1): keine echte Projektkarte.
   global?: boolean;
 }

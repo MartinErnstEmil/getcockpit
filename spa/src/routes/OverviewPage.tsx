@@ -12,6 +12,7 @@ import OnboardingBanner from "@/components/OnboardingBanner";
 import Tile from "@/components/Tile";
 import { useT, useLocale, type Locale } from "@/lib/i18n";
 import { shortName, dayMonth } from "@/lib/utils";
+import { gitAdvisoryVisible } from "@/lib/gitmode";
 import type { NextAction, ProjectStatus } from "@/api/types";
 
 type TFn = (key: string, params?: Record<string, string | number>) => string;
@@ -64,11 +65,11 @@ export default function OverviewPage() {
     // done-mit-Antwort ist eine getroffene Entscheidung, kein Entwurf —
     // dieselbe Semantik wie decisionsView (PO 12.07., i-e2fcaaa932).
     draftCount: inScopeItems.filter((i) => i.answer && i.status !== "answered" && i.status !== "done").length,
-    // Advisory-Stufe des Git-Konzepts: ALLE Projekte der Auswahl mit
-    // ungesicherter Arbeit zählen (nicht nur das schlimmste ab 10) — die
-    // Empfehlung führt in den Git-Tab, wo je Repo Details + Live-Refresh stehen.
+    // Advisory-Stufe des Git-Konzepts: Projekte der Auswahl mit ungesicherter
+    // Arbeit zählen (nicht nur das schlimmste ab 10) — außer im Modus 'manual'
+    // (nur anzeigen, keine Empfehlungen). Die Empfehlung führt in den Git-Tab.
     dirtyProjects: projects
-      .filter((p) => (p.git?.dirtyFiles ?? 0) > 0)
+      .filter((p) => (p.git?.dirtyFiles ?? 0) > 0 && gitAdvisoryVisible(p.gitMode))
       .sort((a, b) => (b.git?.dirtyFiles ?? 0) - (a.git?.dirtyFiles ?? 0)),
     onFiles: () => go("/files"),
     onDrafts: () => toInbox("waiting"),

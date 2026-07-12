@@ -6,6 +6,7 @@ import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
 import { ageText, shortName } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { gitAdvisoryVisible } from "@/lib/gitmode";
 import type { AheadBehind } from "@/api/types";
 
 // /git — Git-Transparenz (PO 11.07.): eine Zeile je Projekt aus dem
@@ -51,10 +52,14 @@ export default function GitPage() {
         <div className="space-y-2">
           {states.map((s) => {
             const ab = live[s.projectPath];
+            // manual = "nur anzeigen": die wertenden Hinweiszeilen entfallen,
+            // die Transparenz-Daten (Branch, dirty, Commits) bleiben sichtbar.
             const hints: string[] = [];
-            if (s.dirtyFiles > 0) hints.push(`${s.dirtyFiles} ungesicherte ${s.dirtyFiles === 1 ? "Datei" : "Dateien"} — Commit fällig?`);
-            if (ab && ab.ahead > 0) hints.push(`${ab.ahead} Commit${ab.ahead === 1 ? "" : "s"} nicht gepusht`);
-            if (ab && ab.behind > 0) hints.push(`${ab.behind} hinter dem Remote — pull/rebase prüfen`);
+            if (gitAdvisoryVisible(s.gitMode)) {
+              if (s.dirtyFiles > 0) hints.push(`${s.dirtyFiles} ungesicherte ${s.dirtyFiles === 1 ? "Datei" : "Dateien"} — Commit fällig?`);
+              if (ab && ab.ahead > 0) hints.push(`${ab.ahead} Commit${ab.ahead === 1 ? "" : "s"} nicht gepusht`);
+              if (ab && ab.behind > 0) hints.push(`${ab.behind} hinter dem Remote — pull/rebase prüfen`);
+            }
             return (
               <div key={s.projectPath} className="ds-card px-4 py-3">
                 <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">

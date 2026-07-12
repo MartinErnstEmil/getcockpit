@@ -17,6 +17,7 @@ import {
   type ScopeProject,
 } from "../spa/src/lib/scope";
 import { extractToken, stripTokenParam } from "../spa/src/lib/token";
+import { gitAdvisoryVisible, sessionPromptGitRule } from "../spa/src/lib/gitmode";
 import {
   parseOptionLine,
   isSelected,
@@ -38,6 +39,25 @@ describe("token capture (pure core)", () => {
       "/spa/inbox?item=i-1#x",
     );
     expect(stripTokenParam("http://127.0.0.1:7878/spa/?token=abc")).toBe("/spa/");
+  });
+});
+
+describe("Git-Modi (reine Ableitung)", () => {
+  it("gitAdvisoryVisible: nur manual unterdrückt Empfehlungen", () => {
+    expect(gitAdvisoryVisible("manual")).toBe(false);
+    expect(gitAdvisoryVisible("advisory")).toBe(true);
+    expect(gitAdvisoryVisible("auto")).toBe(true);
+  });
+
+  it("sessionPromptGitRule: manual weglassen, auto ergänzt den Snapshot-Hinweis", () => {
+    expect(sessionPromptGitRule("manual")).toBeNull();
+    const advisory = sessionPromptGitRule("advisory");
+    expect(advisory).toContain("Git-Disziplin");
+    expect(advisory).not.toContain("refs/cockpit/");
+    const auto = sessionPromptGitRule("auto");
+    expect(auto).toContain("Git-Disziplin");
+    expect(auto).toContain("refs/cockpit/");
+    expect(auto).toContain("ersetzen keine Commits");
   });
 });
 
