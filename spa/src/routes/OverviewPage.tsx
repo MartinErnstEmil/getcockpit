@@ -62,12 +62,15 @@ export default function OverviewPage() {
       (e) => e.exists && keep(e.projectPath || null) && e.remaining < e.budget * 0.1,
     ),
     draftCount: inScopeItems.filter((i) => i.answer && i.status !== "answered").length,
-    worstDirty: projects
-      .filter((p) => p.git && p.git.dirtyFiles >= 10)
-      .sort((a, b) => (b.git?.dirtyFiles ?? 0) - (a.git?.dirtyFiles ?? 0))[0],
+    // Advisory-Stufe des Git-Konzepts: ALLE Projekte der Auswahl mit
+    // ungesicherter Arbeit zählen (nicht nur das schlimmste ab 10) — die
+    // Empfehlung führt in den Git-Tab, wo je Repo Details + Live-Refresh stehen.
+    dirtyProjects: projects
+      .filter((p) => (p.git?.dirtyFiles ?? 0) > 0)
+      .sort((a, b) => (b.git?.dirtyFiles ?? 0) - (a.git?.dirtyFiles ?? 0)),
     onFiles: () => go("/files"),
     onDrafts: () => toInbox("waiting"),
-    onBriefing: goBriefing,
+    onGit: () => go("/git"),
   });
 
   return (
@@ -158,10 +161,10 @@ type Rec = { key: string; text: string; cta: string; go: () => void };
 function buildRecommendations(t: TFn, a: {
   fullConfigs: Array<{ projectPath: string | null }>;
   draftCount: number;
-  worstDirty: ProjectStatus | undefined;
+  dirtyProjects: ProjectStatus[];
   onFiles: () => void;
   onDrafts: () => void;
-  onBriefing: (project: string) => void;
+  onGit: () => void;
 }): Rec[] {
   const recs: Rec[] = [];
   if (a.fullConfigs.length > 0) {
@@ -181,12 +184,20 @@ function buildRecommendations(t: TFn, a: {
       go: a.onDrafts,
     });
   }
-  if (a.worstDirty?.git) {
+  const worst = a.dirtyProjects[0];
+  if (worst?.git) {
     recs.push({
       key: "git",
-      text: t("overview.rec.git", { name: shortName(a.worstDirty.projectPath), n: a.worstDirty.git.dirtyFiles }),
+      text:
+        a.dirtyProjects.length === 1
+          ? t("overview.rec.git", { name: shortName(worst.projectPath), n: worst.git.dirtyFiles })
+          : t("overview.rec.gitMulti", {
+              count: a.dirtyProjects.length,
+              name: shortName(worst.projectPath),
+              n: worst.git.dirtyFiles,
+            }),
       cta: t("overview.rec.gitCta"),
-      go: () => a.onBriefing(a.worstDirty!.projectPath),
+      go: a.onGit,
     });
   }
   return recs.slice(0, 3);
