@@ -15,7 +15,7 @@ import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
-import { collectAheadBehind, collectGitState } from "./gitinfo.js";
+import { collectAheadBehind, collectGitState, collectLastSnapshot } from "./gitinfo.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
 import type { ClaudeCmd } from "./standup.js";
 import type { Store } from "./store.js";
@@ -543,7 +543,11 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
       store.upsertGitState(state);
       const fresh = store.listGitStates().find((s) => s.projectPath === project) ?? null;
-      return sendJson(res, 200, { state: fresh, aheadBehind: collectAheadBehind(project) });
+      return sendJson(res, 200, {
+        state: fresh,
+        aheadBehind: collectAheadBehind(project),
+        lastSnapshot: collectLastSnapshot(project),
+      });
     }
 
     // Banner-Klickpfad: disableAllHooks aus der settings.json entfernen —

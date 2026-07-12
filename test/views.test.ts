@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectGitState } from "../src/gitinfo.js";
+import { collectGitState, collectLastSnapshot } from "../src/gitinfo.js";
 import { SQL_UPSERT_GIT_STATE, gitStateParams } from "../src/schema.js";
 import { decisionsView, portfolioView } from "../src/views.js";
 import { makeTempStore, type TempStore } from "./helpers.js";
@@ -192,6 +192,33 @@ describe("collectGitState (gitinfo)", () => {
       expect(g!.dirtyFiles).toBe(1);
       expect(g!.recentCommits[0]!.subject).toBe("erster commit");
       expect(g!.lastCommitAt).toBe(g!.recentCommits[0]!.at);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("collectLastSnapshot: null ohne Snapshot, sonst Ref + Datum (for-each-ref-Trenner)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cockpit-snap-"));
+    const run = (args: string[]): string =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+    try {
+      run(["init", "-q"]);
+      run(["config", "user.email", "t@example.com"]);
+      run(["config", "user.name", "t"]);
+      run(["config", "commit.gpgsign", "false"]);
+      writeFileSync(join(dir, "a.txt"), "eins", "utf8");
+      run(["add", "."]);
+      run(["commit", "-q", "-m", "init"]);
+      // Noch kein refs/cockpit/ → null.
+      expect(collectLastSnapshot(dir)).toBeNull();
+      // Snapshot-Ref anlegen; danach sauber getrennt in ref + iso-Datum.
+      run(["update-ref", "refs/cockpit/wip-20260712-1030", run(["rev-parse", "HEAD"])]);
+      const snap = collectLastSnapshot(dir);
+      expect(snap).not.toBeNull();
+      expect(snap!.ref).toBe("cockpit/wip-20260712-1030");
+      // iso-strict, ohne Rest-%x1f: parst zu einem gültigen Datum.
+      expect(snap!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(Number.isNaN(Date.parse(snap!.at))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

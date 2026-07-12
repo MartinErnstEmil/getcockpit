@@ -71,3 +71,28 @@ export function collectAheadBehind(cwd: string): { ahead: number; behind: number
     return null;
   }
 }
+
+// Jüngster Auto-Snapshot-Ref (Git-Modi, mode='auto'): der Git-Tab zeigt ihn
+// live auf Abruf (wie ahead/behind, bewusst nicht im Cache). null = noch kein
+// Snapshot / kein Repo. --sort=-refname nutzt die chronologische Ref-Benennung
+// (wip-YYYYMMDD-HHmm); creatordate = Datum des Snapshot-Commits. Trenner ist
+// ein Leerzeichen — for-each-ref expandiert (anders als git log) KEIN %x1f, und
+// weder Ref-Namen noch iso-strict-Daten enthalten Leerzeichen.
+export function collectLastSnapshot(cwd: string): { ref: string; at: string } | null {
+  try {
+    const out = git(cwd, [
+      "for-each-ref",
+      "--sort=-refname",
+      "--count=1",
+      "--format=%(refname:short) %(creatordate:iso-strict)",
+      "refs/cockpit/",
+    ]);
+    if (!out) return null;
+    const sp = out.indexOf(" ");
+    const ref = sp === -1 ? out : out.slice(0, sp);
+    const at = sp === -1 ? "" : out.slice(sp + 1);
+    return ref ? { ref, at } : null;
+  } catch {
+    return null;
+  }
+}

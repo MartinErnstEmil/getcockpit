@@ -310,4 +310,6 @@ export interface GitRefreshResult {
   state: GitStateRow | null;
   // null = kein Upstream konfiguriert (z. B. lokales Repo ohne Remote).
   aheadBehind: AheadBehind | null;
+  // Jüngster Auto-Snapshot (nur bei mode='auto' relevant); null = noch keiner.
+  lastSnapshot: { ref: string; at: string } | null;
 }

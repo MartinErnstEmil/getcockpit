@@ -7,7 +7,7 @@ import EmptyState from "@/components/EmptyState";
 import { ageText, shortName } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { gitAdvisoryVisible } from "@/lib/gitmode";
-import type { AheadBehind } from "@/api/types";
+import type { GitRefreshResult } from "@/api/types";
 
 // /git — Git-Transparenz (PO 11.07.): eine Zeile je Projekt aus dem
 // git_state-Cache (Stop-Hook füllt ihn nach jeder Session), gezielt live
@@ -17,8 +17,9 @@ export default function GitPage() {
   const t = useT();
   const q = useGitStates();
   const refresh = useGitRefresh();
-  // ahead/behind ist ein Live-Wert (kommt nur vom Refresh, nie aus dem Cache).
-  const [live, setLive] = useState<Record<string, AheadBehind | null>>({});
+  // ahead/behind und letzter Snapshot sind Live-Werte (nur vom Refresh, nie
+  // aus dem Cache) — das ganze Refresh-Ergebnis je Projekt merken.
+  const [live, setLive] = useState<Record<string, GitRefreshResult>>({});
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ project: string; message: string } | null>(null);
 
@@ -32,7 +33,7 @@ export default function GitPage() {
     refresh.mutate(
       { project },
       {
-        onSuccess: (r) => setLive((m) => ({ ...m, [project]: r.aheadBehind })),
+        onSuccess: (r) => setLive((m) => ({ ...m, [project]: r })),
         onError: (e) => setRowError({ project, message: e instanceof Error ? e.message : String(e) }),
         onSettled: () => setRefreshing(null),
       },
@@ -51,7 +52,9 @@ export default function GitPage() {
       ) : (
         <div className="space-y-2">
           {states.map((s) => {
-            const ab = live[s.projectPath];
+            const refreshed = live[s.projectPath];
+            const ab = refreshed?.aheadBehind;
+            const snap = refreshed?.lastSnapshot;
             // manual = "nur anzeigen": die wertenden Hinweiszeilen entfallen,
             // die Transparenz-Daten (Branch, dirty, Commits) bleiben sichtbar.
             const hints: string[] = [];
@@ -73,6 +76,11 @@ export default function GitPage() {
                   <Link to="/settings" className="ds-tag hover:underline" title={t("git.modeChip.tip")}>
                     {t(`settings.git.mode.${s.gitMode}`)}
                   </Link>
+                  {/* Letzter Auto-Snapshot: Live-Wert, erscheint nach dem Refresh
+                      (wie ahead/behind) und nur im Modus 'auto'. */}
+                  {s.gitMode === "auto" && snap && (
+                    <span className="text-xs text-ink-2" title={snap.ref}>letzter Snapshot: {ageText(snap.at)}</span>
+                  )}
                   {ab !== undefined && (
                     <span className="font-mono text-xs text-ink-2">
                       {ab === null ? "kein Upstream" : `↑${ab.ahead} ↓${ab.behind}`}

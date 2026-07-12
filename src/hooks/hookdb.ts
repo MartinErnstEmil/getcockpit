@@ -14,6 +14,7 @@ import {
   SQL_INSERT_EVENT,
   SQL_INSERT_TURN,
   SQL_SELECT_CAPTURE,
+  SQL_SELECT_GITMODE,
   SQL_UPSERT_GIT_STATE,
   eventInsertParams,
   gitStateParams,
@@ -80,4 +81,12 @@ export function captureEnabled(db: DatabaseSync, project: string): boolean {
     | { capture_enabled: number }
     | undefined;
   return !row || row.capture_enabled !== 0;
+}
+
+// Git-Modus lesen (Hook): fehlender Eintrag = 'advisory' (wie im Store).
+export function gitMode(db: DatabaseSync, project: string): string {
+  const row = db.prepare(SQL_SELECT_GITMODE).get(normalizeProjectPath(project)) as
+    | { git_mode: string }
+    | undefined;
+  return row?.git_mode ?? "advisory";
 }

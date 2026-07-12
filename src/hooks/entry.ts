@@ -11,7 +11,8 @@ import { cockpitHome, deadLetterPath, hooksLogPath, resolveDbPath } from "../pat
 import { redactText } from "../redact.js";
 import { createInternalSessionFilter, parseTranscriptLine, type TranscriptTurn } from "../transcript.js";
 import { buildBriefing, renderClaimedContext } from "./briefing.js";
-import { captureEnabled, claimHumanAnswers, insertHookTurn, openHookDb, recordHookEvent, upsertGitState } from "./hookdb.js";
+import { captureEnabled, claimHumanAnswers, gitMode, insertHookTurn, openHookDb, recordHookEvent, upsertGitState } from "./hookdb.js";
+import { takeAutoSnapshot } from "./snapshot.js";
 
 const TAIL_BYTES = 256 * 1024;
 
@@ -135,6 +136,20 @@ function handleStop(payload: HookPayload): void {
     if (payload.cwd) {
       const g = collectGitState(payload.cwd);
       if (g) upsertGitState(db, g);
+    }
+    // Auto-Snapshot (Git-Modi, mode='auto'): sichert den Arbeitsstand unter
+    // refs/cockpit/ ohne HEAD/Index/Worktree zu berühren. Fail-open — jeder
+    // Fehler landet in hooks.log (via logLine), nie in einer Exception.
+    if (payload.cwd && gitMode(db, payload.cwd) === "auto") {
+      const snap = takeAutoSnapshot(payload.cwd, payload.session_id, logLine);
+      if (snap) {
+        recordHookEvent(db, {
+          eventType: "git_snapshot",
+          sessionId: payload.session_id,
+          projectPath: payload.cwd,
+          payload: { sha: snap.sha },
+        });
+      }
     }
   } finally {
     db.close();

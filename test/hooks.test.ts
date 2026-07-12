@@ -2,7 +2,7 @@
 // M4-Gate (PRD F3): stdin-Fixture-E2E gegen das GEBAUTE Hook-Bundle
 // (dist/hooks/cockpit-hook.cjs) als Kindprozess. Exit-Code IMMER 0.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -213,6 +213,145 @@ describe("hook bundle E2E (UserPromptSubmit)", () => {
     };
     store2.close();
     expect(row.delivered_at).toBeTruthy();
+  });
+});
+
+// G4: Auto-Snapshot im Stop-Hook (Git-Modi, mode='auto'). Echtes Temp-Repo;
+// die Kern-Zusicherung ist, dass HEAD/Index/Worktree byte-identisch bleiben.
+function g(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+}
+
+function initRepo(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  g(dir, ["init", "-q", "-b", "master"]);
+  g(dir, ["config", "user.email", "t@example.com"]);
+  g(dir, ["config", "user.name", "Test"]);
+  g(dir, ["config", "commit.gpgsign", "false"]);
+  writeFileSync(join(dir, "a.txt"), "hello\n", "utf8");
+  g(dir, ["add", "-A"]);
+  g(dir, ["commit", "-q", "-m", "init"]);
+}
+
+function snapshotRefs(dir: string): string[] {
+  return g(dir, ["for-each-ref", "--format=%(refname)", "refs/cockpit/"]).split("\n").filter(Boolean);
+}
+
+function stopPayload(repo: string, transcript: string): string {
+  return JSON.stringify({ hook_event_name: "Stop", session_id: "s-live", transcript_path: transcript, cwd: repo });
+}
+
+function writeStopTranscript(repo: string): string {
+  const transcript = join(tmp, "t.jsonl");
+  writeFileSync(
+    transcript,
+    JSON.stringify({
+      uuid: "u-1",
+      sessionId: "s-live",
+      cwd: repo,
+      timestamp: "2026-07-12T01:00:00Z",
+      type: "user",
+      message: { role: "user", content: "arbeite" },
+      gitBranch: "master",
+    }) + "\n",
+    "utf8",
+  );
+  return transcript;
+}
+
+describe("hook bundle E2E (Auto-Snapshot, Git-Modi)", () => {
+  it("auto + dirty: Snapshot-Ref entsteht, HEAD/Index/Worktree bleiben byte-identisch", () => {
+    const repo = join(tmp, "repo");
+    initRepo(repo);
+    const seed = openDb();
+    seed.setGitMode(repo, "auto");
+    seed.close();
+    // Ungesicherte Arbeit: neue Datei + geänderte getrackte Datei.
+    writeFileSync(join(repo, "b.txt"), "ungesichert\n", "utf8");
+    writeFileSync(join(repo, "a.txt"), "hello geaendert\n", "utf8");
+    // Index vor dem Lauf stabilisieren (git status schreibt den stat-Cache),
+    // dann den Vorher-Zustand byte-genau festhalten.
+    const beforeStatus = g(repo, ["status", "--porcelain"]);
+    g(repo, ["status", "--porcelain"]);
+    const beforeHead = g(repo, ["rev-parse", "HEAD"]);
+    const beforeIndex = readFileSync(join(repo, ".git", "index"));
+
+    const res = runHook(stopPayload(repo, writeStopTranscript(repo)));
+    expect(res.status).toBe(0);
+
+    const refs = snapshotRefs(repo);
+    expect(refs.length).toBe(1);
+    // Der Snapshot-Tree enthält die ungesicherte Datei.
+    expect(g(repo, ["ls-tree", "-r", "--name-only", refs[0]!])).toContain("b.txt");
+    // Kern-Zusicherung: Arbeitszustand unverändert.
+    expect(g(repo, ["status", "--porcelain"])).toBe(beforeStatus);
+    expect(g(repo, ["rev-parse", "HEAD"])).toBe(beforeHead);
+    expect(readFileSync(join(repo, ".git", "index")).equals(beforeIndex)).toBe(true);
+    // git_snapshot-Event mit der sha geschrieben.
+    const store = openDb();
+    const ev = store.rawDb().prepare("SELECT payload_json FROM events WHERE event_type='git_snapshot'").get() as
+      | { payload_json: string }
+      | undefined;
+    store.close();
+    expect(ev?.payload_json).toContain(g(repo, ["rev-parse", refs[0]!]));
+    console.log(`[hooks] Auto-Snapshot-Latenz inkl. Spawn: ${res.ms.toFixed(0)} ms`);
+  });
+
+  it("advisory und manual: kein Snapshot-Ref", () => {
+    for (const mode of ["advisory", "manual"] as const) {
+      const repo = join(tmp, `repo-${mode}`);
+      initRepo(repo);
+      const seed = openDb();
+      seed.setGitMode(repo, mode);
+      seed.close();
+      writeFileSync(join(repo, "b.txt"), "ungesichert\n", "utf8");
+      expect(runHook(stopPayload(repo, writeStopTranscript(repo))).status).toBe(0);
+      expect(snapshotRefs(repo)).toEqual([]);
+    }
+  });
+
+  it("auto ohne ungesicherte Arbeit: kein Ref (Dedupe gegen HEAD-Tree)", () => {
+    const repo = join(tmp, "repo");
+    initRepo(repo);
+    const seed = openDb();
+    seed.setGitMode(repo, "auto");
+    seed.close();
+    // Sauberer Worktree == HEAD: zweimal Stop, nie ein Ref.
+    expect(runHook(stopPayload(repo, writeStopTranscript(repo))).status).toBe(0);
+    expect(runHook(stopPayload(repo, writeStopTranscript(repo))).status).toBe(0);
+    expect(snapshotRefs(repo)).toEqual([]);
+  });
+
+  it("Prune: mehr als 20 Refs werden auf 20 gestutzt", () => {
+    const repo = join(tmp, "repo");
+    initRepo(repo);
+    const seed = openDb();
+    seed.setGitMode(repo, "auto");
+    seed.close();
+    // 21 künstliche (ältere) Snapshot-Refs auf HEAD.
+    const head = g(repo, ["rev-parse", "HEAD"]);
+    for (let i = 0; i <= 20; i++) {
+      g(repo, ["update-ref", `refs/cockpit/wip-20250101-${String(i).padStart(4, "0")}`, head]);
+    }
+    expect(snapshotRefs(repo).length).toBe(21);
+    // Ungesicherte Arbeit → der Lauf legt einen 22. (heutigen) Ref an und prunt.
+    writeFileSync(join(repo, "b.txt"), "ungesichert\n", "utf8");
+    expect(runHook(stopPayload(repo, writeStopTranscript(repo))).status).toBe(0);
+    expect(snapshotRefs(repo).length).toBe(20);
+  });
+
+  it("kein Repo: auto endet still mit Exit 0, kein Snapshot-Event", () => {
+    const dir = join(tmp, "kein-repo");
+    mkdirSync(dir, { recursive: true });
+    const seed = openDb();
+    seed.setGitMode(dir, "auto");
+    seed.close();
+    const res = runHook(stopPayload(dir, writeStopTranscript(dir)));
+    expect(res.status).toBe(0);
+    const store = openDb();
+    const ev = store.rawDb().prepare("SELECT 1 FROM events WHERE event_type='git_snapshot'").get();
+    store.close();
+    expect(ev).toBeUndefined();
   });
 });
 
