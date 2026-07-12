@@ -447,6 +447,20 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       store.recordEvent({ eventType: "project_settings", projectPath: project, payload: { path: url.pathname, ...on } });
       return sendJson(res, 200, { projects: store.projectAdminList() });
     }
+    // Git-Modus je Projekt (Git-Modi): trägt project + mode statt id, daher vor
+    // dem id-Zwang. Mode-Allowlist im Store (assertOneOf) — Junk endet als 400.
+    if (url.pathname === "/api/project-gitmode") {
+      const project = (body as { project?: string }).project ?? "";
+      const mode = (body as { mode?: string }).mode ?? "";
+      if (!project) return sendJson(res, 400, { error: "project fehlt" });
+      try {
+        store.setGitMode(project, mode);
+      } catch (err) {
+        return sendJson(res, 400, { error: (err as Error).message });
+      }
+      store.recordEvent({ eventType: "project_settings", projectPath: project, payload: { path: url.pathname, mode } });
+      return sendJson(res, 200, { projects: store.projectAdminList() });
+    }
     if (url.pathname === "/api/project-delete") {
       const project = (body as { project?: string }).project ?? "";
       // Doppelte Bestätigung: der Client zeigt zwei Dialoge, der Server verlangt

@@ -173,6 +173,33 @@ describe("GET /api/status (F10)", () => {
   });
 });
 
+// Git-Modi: POST /api/project-gitmode setzt den Modus je Projekt; die
+// Antwort spiegelt die aktualisierte Admin-Liste, Junk-Modi enden als 400.
+describe("POST /api/project-gitmode (Git-Modi)", () => {
+  it("sets the mode and reflects it in projectAdminList", async () => {
+    const res = await fetch(url("/api/project-gitmode"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ project: "c:/dev/demo", mode: "auto" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { projects: Array<{ projectPath: string; gitMode: string }> };
+    expect(body.projects.find((p) => p.projectPath === "c:/dev/demo")?.gitMode).toBe("auto");
+    expect(ts.store.gitMode("c:/dev/demo")).toBe("auto");
+  });
+
+  it("rejects an unknown mode with 400", async () => {
+    const res = await fetch(url("/api/project-gitmode"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ project: "c:/dev/demo", mode: "bogus" }),
+    });
+    expect(res.status).toBe(400);
+    // Vorheriger gültiger Modus bleibt unangetastet.
+    expect(ts.store.gitMode("c:/dev/demo")).toBe("auto");
+  });
+});
+
 // Launch-UI: Status-Wechsel für "später"/Undo — Allowlist, answered gesperrt.
 describe("POST /api/update (UX-SPEC Quick-Actions)", () => {
   it("allows postponed/new/done, rejects answered and junk", async () => {

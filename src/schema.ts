@@ -238,6 +238,12 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     updated_at TEXT NOT NULL
   );
   `,
+  // v4 (Git-Modi): git_mode je Projekt. DEFAULT 'advisory' backfillt bestehende
+  // project_settings-Zeilen — Bestandsprojekte verhalten sich danach exakt wie
+  // heute (globale Advisory). Fehlt der ganze Eintrag, defaultet der Lesecode.
+  `
+  ALTER TABLE project_settings ADD COLUMN git_mode TEXT NOT NULL DEFAULT 'advisory';
+  `,
 ];
 
 // Geteilt zwischen Store (better-sqlite3) und Hook-Bundle (node:sqlite): Upsert
@@ -255,6 +261,16 @@ export const SQL_UPSERT_PROJECT_ARCHIVE = `INSERT INTO project_settings
 
 // Capture-Flag lesen (Hook): fehlender Eintrag ODER capture_enabled=1 → an.
 export const SQL_SELECT_CAPTURE = "SELECT capture_enabled FROM project_settings WHERE project_path = ?";
+
+// Git-Modus upserten (Store) und lesen (Hook-Bundle, node:sqlite): wie
+// SQL_UPSERT_PROJECT_CAPTURE — eine Wahrheit für beide Treiber. Fehlender
+// Eintrag beim SELECT (kein Row) = Default 'advisory' im Lesecode.
+export const SQL_UPSERT_PROJECT_GITMODE = `INSERT INTO project_settings
+  (project_path, git_mode, updated_at) VALUES (?, ?, ?)
+  ON CONFLICT(project_path) DO UPDATE SET
+    git_mode = excluded.git_mode, updated_at = excluded.updated_at`;
+
+export const SQL_SELECT_GITMODE = "SELECT git_mode FROM project_settings WHERE project_path = ?";
 
 // Geteilt zwischen Stop-Hook (node:sqlite) und Store (better-sqlite3) — wie
 // SQL_INSERT_TURN: ein Statement, eine Parameter-Assemblierung.

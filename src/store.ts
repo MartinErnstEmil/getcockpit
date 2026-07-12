@@ -13,9 +13,11 @@ import {
   SQL_HAS_EVENT,
   SQL_INSERT_EVENT,
   SQL_INSERT_TURN,
+  SQL_SELECT_GITMODE,
   SQL_UPSERT_GIT_STATE,
   SQL_UPSERT_PROJECT_ARCHIVE,
   SQL_UPSERT_PROJECT_CAPTURE,
+  SQL_UPSERT_PROJECT_GITMODE,
   eventInsertParams,
   gitStateParams,
   turnInsertParams,
@@ -33,6 +35,7 @@ export interface GitStateRow {
   dirtyFiles: number;
   lastCommitAt: string | null;
   recentCommits: Array<{ sha: string; at: string; subject: string }>;
+  gitMode: string;
   updatedAt: string;
 }
 
@@ -40,6 +43,7 @@ export interface ProjectSetting {
   projectPath: string;
   captureEnabled: boolean;
   archivedAt: string | null;
+  gitMode: string;
   updatedAt: string;
 }
 
@@ -47,6 +51,7 @@ export interface ProjectAdmin {
   projectPath: string;
   captureEnabled: boolean;
   archived: boolean;
+  gitMode: string;
   lastActivity: string | null;
   turns: number;
   openItems: number;
@@ -57,6 +62,10 @@ export const ITEM_STATUSES = ["new", "in_progress", "answered", "postponed", "re
 export const ITEM_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
 // Wer geantwortet hat — das Briefing (F7) hängt an answered_by = 'human'.
 export const ANSWER_SOURCES = ["human", "claude"] as const;
+// Git-Modi je Projekt (Migration v4). advisory = heutiges globales Verhalten,
+// also der Default für Projekte ohne Eintrag.
+export const GIT_MODES = ["manual", "advisory", "auto"] as const;
+export const DEFAULT_GIT_MODE = "advisory";
 
 // Enum-Validierung lebt hier, weil ALLE Eintrittspunkte (CLI, MCP, Web)
 // durch den Store laufen; das DB-Schema hat keine CHECK-Constraints.
@@ -711,14 +720,28 @@ export class Store {
     );
   }
 
+  setGitMode(project: string, mode: string): void {
+    assertOneOf("gitMode", mode, GIT_MODES);
+    this.prep(SQL_UPSERT_PROJECT_GITMODE).run(normalizeProjectPath(project), mode, nowIso());
+  }
+
+  // Fehlender Eintrag = 'advisory' (Default wie im Hook-Lesecode).
+  gitMode(project: string): string {
+    const row = this.prep(SQL_SELECT_GITMODE).get(normalizeProjectPath(project)) as
+      | { git_mode: string }
+      | undefined;
+    return row?.git_mode ?? DEFAULT_GIT_MODE;
+  }
+
   listProjectSettings(): ProjectSetting[] {
     const rows = this.prep(
-      "SELECT project_path, capture_enabled, archived_at, updated_at FROM project_settings",
-    ).all() as Array<{ project_path: string; capture_enabled: number; archived_at: string | null; updated_at: string }>;
+      "SELECT project_path, capture_enabled, archived_at, git_mode, updated_at FROM project_settings",
+    ).all() as Array<{ project_path: string; capture_enabled: number; archived_at: string | null; git_mode: string; updated_at: string }>;
     return rows.map((r) => ({
       projectPath: r.project_path,
       captureEnabled: r.capture_enabled !== 0,
       archivedAt: r.archived_at,
+      gitMode: r.git_mode,
       updatedAt: r.updated_at,
     }));
   }
@@ -742,6 +765,8 @@ export class Store {
       recent_commits: string;
       updated_at: string;
     }>;
+    // gitMode aus project_settings zuspielen (Projekte ohne Eintrag = 'advisory').
+    const modes = new Map(this.listProjectSettings().map((s) => [s.projectPath, s.gitMode]));
     return rows.map((r) => ({
       projectPath: r.project_path,
       headSha: r.head_sha,
@@ -749,6 +774,7 @@ export class Store {
       dirtyFiles: r.dirty_files,
       lastCommitAt: r.last_commit_at,
       recentCommits: JSON.parse(r.recent_commits) as GitStateRow["recentCommits"],
+      gitMode: modes.get(r.project_path) ?? DEFAULT_GIT_MODE,
       updatedAt: r.updated_at,
     }));
   }
@@ -784,6 +810,7 @@ export class Store {
           projectPath: p,
           captureEnabled: s ? s.captureEnabled : true,
           archived: s ? s.archivedAt !== null : false,
+          gitMode: s ? s.gitMode : DEFAULT_GIT_MODE,
           lastActivity: t?.lastActivity ?? null,
           turns: t?.turns ?? 0,
           openItems: openByProject.get(p) ?? 0,

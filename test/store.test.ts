@@ -203,6 +203,24 @@ describe("items CRUD (PRD F5)", () => {
     expect(portfolioView(store, {}).projects.map((p) => p.projectPath)).not.toContain("c:/dev/arch");
   });
 
+  it("Git-Modi (Migration v4): Default advisory, Spalten-Default, Roundtrip, Junk wirft", () => {
+    // Frische DB: kein Eintrag → Default advisory, ohne dass eine Zeile existiert.
+    expect(store.gitMode("c:/dev/gm")).toBe("advisory");
+
+    // Spalten-Default: ein Capture-Upsert legt die Zeile ohne git_mode an →
+    // die ALTER-TABLE-DEFAULT-Klausel füllt 'advisory'.
+    store.setCapture("c:/dev/gm", true);
+    expect(store.listProjectSettings().find((s) => s.projectPath === "c:/dev/gm")?.gitMode).toBe("advisory");
+
+    // Roundtrip: setzen → gitMode + projectAdminList tragen den Modus.
+    store.setGitMode("c:/dev/gm", "auto");
+    expect(store.gitMode("c:/dev/gm")).toBe("auto");
+    expect(store.projectAdminList().find((a) => a.projectPath === "c:/dev/gm")?.gitMode).toBe("auto");
+
+    // Allowlist: Junk-Modus wirft (Store-Schicht, kein CHECK-Constraint).
+    expect(() => store.setGitMode("c:/dev/gm", "bogus")).toThrow(/gitMode/);
+  });
+
   it("status done sets done_at; update bumps updated_at", () => {
     const item = store.addItem({ type: "result", title: "Fertig" });
     const done = store.updateItem(item.id, { status: "done" });
