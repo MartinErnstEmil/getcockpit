@@ -63,7 +63,6 @@ export interface ProjectAdmin {
 
 // Git-Modi je Projekt — Allowlist gespiegelt aus store.ts GIT_MODES.
 export const GIT_MODES = ["manual", "advisory", "auto"] as const;
-export type GitMode = (typeof GIT_MODES)[number];
 
 export interface StatusResponse {
   projects: ProjectStatus[];
