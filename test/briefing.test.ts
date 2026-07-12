@@ -77,6 +77,24 @@ describe("SessionStart briefing (F7)", () => {
     store.close();
   });
 
+  it("schreibt ein answer_delivered-Event (via=briefing, session_id) je Antwort", () => {
+    const id = seedAnsweredItem();
+    additionalContext(sessionStart("s-brief"));
+    const store = Store.open(dbPath);
+    const rows = store
+      .rawDb()
+      .prepare("SELECT session_id, payload_json FROM events WHERE event_type='answer_delivered'")
+      .all() as Array<{ session_id: string | null; payload_json: string }>;
+    const info = store.deliveryInfo([id]).get(id);
+    store.close();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]!.payload_json)).toEqual({ itemId: id, via: "briefing" });
+    expect(rows[0]!.session_id).toBe("s-brief");
+    // deliveryInfo spiegelt Weg + Session zurück.
+    expect(info?.via).toBe("briefing");
+    expect(info?.sessionId).toBe("s-brief");
+  });
+
   it("second call in the same session delivers nothing (events dedupe)", () => {
     seedAnsweredItem();
     expect(additionalContext(sessionStart("s-1"))).toBeTruthy();

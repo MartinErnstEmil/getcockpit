@@ -93,6 +93,16 @@ function handlePrompt(payload: HookPayload): void {
     if (payload.cwd) {
       const claimed = claimHumanAnswers(db, payload.cwd);
       if (claimed.length > 0) {
+        // Zustell-Protokoll: ein answer_delivered-Event JE beanspruchter Antwort
+        // (via='prompt', session vorhanden). Billige Inserts, kein Extra-Budget.
+        for (const c of claimed) {
+          recordHookEvent(db, {
+            eventType: "answer_delivered",
+            sessionId: payload.session_id,
+            projectPath: payload.cwd,
+            payload: { itemId: c.uuid, via: "prompt" },
+          });
+        }
         process.stdout.write(
           JSON.stringify({
             hookSpecificOutput: {

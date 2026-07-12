@@ -210,6 +210,11 @@ export function buildMcpServer(store: Store): McpServer {
       // (project_path IS NULL). Default (cwd) beansprucht Projekt + Globale.
       const project = resolveProjectArg(a["projectPath"] as string | undefined) ?? "";
       const answers = store.claimHumanAnswers(project);
+      // Zustell-Protokoll: ein answer_delivered-Event JE abgeholter Antwort
+      // (via='mcp', keine Session — der MCP-Server kennt keinen Session-Kontext).
+      for (const ans of answers) {
+        store.recordEvent({ eventType: "answer_delivered", projectPath: project, payload: { itemId: ans.uuid, via: "mcp" } });
+      }
       return ok({ count: answers.length, answers });
     },
   );

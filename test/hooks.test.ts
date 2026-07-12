@@ -211,8 +211,17 @@ describe("hook bundle E2E (UserPromptSubmit)", () => {
     const row = store2.rawDb().prepare("SELECT delivered_at FROM items WHERE uuid = ?").get(item.id) as {
       delivered_at: string | null;
     };
+    // Zustell-Protokoll: genau EIN answer_delivered-Event (via=prompt, session)
+    // — die zweite (leere) Injektion beansprucht nichts, schreibt also keins.
+    const ev = store2
+      .rawDb()
+      .prepare("SELECT session_id, payload_json FROM events WHERE event_type='answer_delivered'")
+      .all() as Array<{ session_id: string | null; payload_json: string }>;
     store2.close();
     expect(row.delivered_at).toBeTruthy();
+    expect(ev).toHaveLength(1);
+    expect(JSON.parse(ev[0]!.payload_json)).toEqual({ itemId: item.id, via: "prompt" });
+    expect(ev[0]!.session_id).toBe("s-live");
   });
 });
 

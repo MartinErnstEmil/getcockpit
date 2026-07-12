@@ -221,6 +221,24 @@ describe("items CRUD (PRD F5)", () => {
     expect(() => store.setGitMode("c:/dev/gm", "bogus")).toThrow(/gitMode/);
   });
 
+  it("deliveryInfo: bei Mehrfach-Events gewinnt das älteste (erstes Abholen)", () => {
+    const item = store.addItem({ type: "question", title: "Mehrfach?", projectPath: "c:/dev/d" });
+    store.answerItem(item.id, "ja", "human");
+    // Dokumentierte Parallel-Kante: prompt zuerst abgeholt, dann briefing.
+    const e1 = store.recordEvent({ eventType: "answer_delivered", sessionId: "s-old", payload: { itemId: item.id, via: "prompt" } });
+    const e2 = store.recordEvent({ eventType: "answer_delivered", sessionId: "s-new", payload: { itemId: item.id, via: "briefing" } });
+    const setAt = store.rawDb().prepare("UPDATE events SET created_at = ? WHERE uuid = ?");
+    setAt.run("2026-07-12T10:00:00.000Z", e1.id);
+    setAt.run("2026-07-12T11:00:00.000Z", e2.id);
+
+    const info = store.deliveryInfo([item.id]).get(item.id);
+    expect(info?.via).toBe("prompt");
+    expect(info?.sessionId).toBe("s-old");
+    expect(info?.at).toBe("2026-07-12T10:00:00.000Z");
+    // Leere Eingabe = leere Map (kein IN () SQL-Fehler).
+    expect(store.deliveryInfo([]).size).toBe(0);
+  });
+
   it("status done sets done_at; update bumps updated_at", () => {
     const item = store.addItem({ type: "result", title: "Fertig" });
     const done = store.updateItem(item.id, { status: "done" });

@@ -249,7 +249,11 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
         project: url.searchParams.get("project") ?? undefined,
         limit: 200,
       });
-      return sendJson(res, 200, { items });
+      // Zustell-Quittung: NUR zugestellte Items anreichern (eine gruppierte
+      // Query, kein N+1). Nicht zugestellte tragen keine delivery.
+      const delivered = store.deliveryInfo(items.filter((i) => i.deliveredAt).map((i) => i.id));
+      const enriched = items.map((i) => (delivered.has(i.id) ? { ...i, delivery: delivered.get(i.id) } : i));
+      return sendJson(res, 200, { items: enriched });
     }
     // Einzelnes Item unabhängig von Auswahl/Status/Cap (Deep-Link ?item= muss
     // die Karte immer öffnen können; Präfix-Match wie in der CLI).
@@ -258,7 +262,8 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       if (!id) return sendJson(res, 400, { error: "id fehlt" });
       const item = store.getItem(id);
       if (!item) return sendJson(res, 404, { error: "Item nicht gefunden" });
-      return sendJson(res, 200, { item });
+      const delivery = store.deliveryInfo([item.id]).get(item.id) ?? null;
+      return sendJson(res, 200, { item: { ...item, delivery } });
     }
     if (req.method === "GET" && url.pathname === "/api/decisions") {
       const decisions = decisionsView(store, {

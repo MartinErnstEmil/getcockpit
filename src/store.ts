@@ -57,6 +57,14 @@ export interface ProjectAdmin {
   openItems: number;
 }
 
+// Zustell-Protokoll (answer_delivered): Weg + Session + Zeitpunkt der ersten
+// Abholung einer beantworteten Karte. via='mcp' hat keine Session (sessionId null).
+export interface DeliveryInfo {
+  at: string;
+  sessionId: string | null;
+  via: string;
+}
+
 export const ITEM_TYPES = ["question", "proposal", "decision", "result", "blocker", "fyi"] as const;
 export const ITEM_STATUSES = ["new", "in_progress", "answered", "postponed", "rejected", "done"] as const;
 export const ITEM_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
@@ -605,6 +613,29 @@ export class Store {
 
   hasEvent(eventType: string, sessionId: string): boolean {
     return this.prep(SQL_HAS_EVENT).get(eventType, sessionId) !== undefined;
+  }
+
+  // Zustell-Protokoll (Zustell-Transparenz): je Item das ERSTE answer_delivered-
+  // Event (Weg + Session + Zeitpunkt). EINE gruppierte Query statt N+1. Bei
+  // Mehrfach-Events (dokumentierte Parallel-Kante) gewinnt das älteste — das
+  // erste Abholen zählt. session_id ist NULL bei via='mcp' (kein Session-Kontext).
+  deliveryInfo(itemIds: string[]): Map<string, DeliveryInfo> {
+    const map = new Map<string, DeliveryInfo>();
+    if (itemIds.length === 0) return map;
+    const placeholders = itemIds.map(() => "?").join(", ");
+    const rows = this.prep(
+      `SELECT json_extract(payload_json, '$.itemId') AS itemId,
+              json_extract(payload_json, '$.via') AS via,
+              session_id AS sessionId, created_at AS at
+         FROM events
+        WHERE event_type = 'answer_delivered'
+          AND json_extract(payload_json, '$.itemId') IN (${placeholders})
+        ORDER BY created_at ASC`,
+    ).all(...itemIds) as Array<{ itemId: string; via: string; sessionId: string | null; at: string }>;
+    for (const r of rows) {
+      if (!map.has(r.itemId)) map.set(r.itemId, { at: r.at, sessionId: r.sessionId, via: r.via });
+    }
+    return map;
   }
 
   // Onboarding-Hinweis-Zustand lebt in DB-Events, NICHT in localStorage

@@ -197,7 +197,11 @@ describe("MCP server (7 tools, F6)", () => {
     // Gemeinsames delivered_at: das Briefing würde sie nicht erneut zustellen.
     const check = Store.open(dbPath);
     expect(check.getItem(item.id)?.deliveredAt).toBeTruthy();
+    // Zustell-Protokoll: genau EIN answer_delivered-Event, via=mcp, ohne Session.
+    const info = check.deliveryInfo([item.id]).get(item.id);
     check.close();
+    expect(info?.via).toBe("mcp");
+    expect(info?.sessionId).toBeNull();
   });
 
   it("unknown item ids return isError without crashing the server", async () => {

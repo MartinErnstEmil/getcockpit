@@ -103,6 +103,17 @@ export function buildBriefing(db: DatabaseSync, sessionId: string, cwd: string):
     db.prepare(
       `UPDATE items SET delivered_at = ? WHERE uuid IN (${placeholders}) AND delivered_at IS NULL`,
     ).run(nowIso(), ...answeredIds);
+    // Zustell-Protokoll: ein answer_delivered-Event JE gerenderter Antwort
+    // (via='briefing'). Für die Karten-Quittung; ändert die Zustell-Semantik
+    // nicht. deliveryInfo nimmt bei der Parallel-Kante ohnehin das älteste.
+    for (const itemId of answeredIds) {
+      recordHookEvent(db, {
+        eventType: "answer_delivered",
+        sessionId,
+        projectPath: project,
+        payload: { itemId, via: "briefing" },
+      });
+    }
   }
   recordHookEvent(db, {
     eventType: "briefing",
