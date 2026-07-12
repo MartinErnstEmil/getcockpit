@@ -13,13 +13,28 @@ import {
   SQL_HAS_EVENT,
   SQL_INSERT_EVENT,
   SQL_INSERT_TURN,
+  SQL_UPSERT_GIT_STATE,
   SQL_UPSERT_PROJECT_ARCHIVE,
   SQL_UPSERT_PROJECT_CAPTURE,
   eventInsertParams,
+  gitStateParams,
   turnInsertParams,
   type ClaimedAnswer,
+  type GitStateInput,
   type TurnParamsInput,
 } from "./schema.js";
+
+// Git-Tab: eine Zeile je Projekt aus dem git_state-Cache (Stop-Hook füllt ihn
+// opportunistisch; /api/git-refresh aktualisiert gezielt live).
+export interface GitStateRow {
+  projectPath: string;
+  headSha: string | null;
+  branch: string | null;
+  dirtyFiles: number;
+  lastCommitAt: string | null;
+  recentCommits: Array<{ sha: string; at: string; subject: string }>;
+  updatedAt: string;
+}
 
 export interface ProjectSetting {
   projectPath: string;
@@ -704,6 +719,36 @@ export class Store {
       projectPath: r.project_path,
       captureEnabled: r.capture_enabled !== 0,
       archivedAt: r.archived_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  // --- Git-Zustand (Git-Tab) ------------------------------------------------
+
+  upsertGitState(g: GitStateInput): void {
+    this.prep(SQL_UPSERT_GIT_STATE).run(...gitStateParams(g));
+  }
+
+  listGitStates(): GitStateRow[] {
+    const rows = this.prep(
+      `SELECT project_path, head_sha, branch, dirty_files, last_commit_at, recent_commits, updated_at
+       FROM git_state ORDER BY updated_at DESC`,
+    ).all() as Array<{
+      project_path: string;
+      head_sha: string | null;
+      branch: string | null;
+      dirty_files: number;
+      last_commit_at: string | null;
+      recent_commits: string;
+      updated_at: string;
+    }>;
+    return rows.map((r) => ({
+      projectPath: r.project_path,
+      headSha: r.head_sha,
+      branch: r.branch,
+      dirtyFiles: r.dirty_files,
+      lastCommitAt: r.last_commit_at,
+      recentCommits: JSON.parse(r.recent_commits) as GitStateRow["recentCommits"],
       updatedAt: r.updated_at,
     }));
   }

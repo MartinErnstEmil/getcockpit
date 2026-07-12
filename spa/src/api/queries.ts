@@ -8,6 +8,8 @@ import type {
   DecisionComment,
   DecisionEntry,
   FileView,
+  GitRefreshResult,
+  GitStateRow,
   Item,
   ProjectAdmin,
   ReportDay,
@@ -347,4 +349,23 @@ export function logAssistEvent(
   payload: { itemId: string; variant?: string; kind?: string },
 ): void {
   apiPost("/api/events", { eventType, payload }).catch((e) => console.warn("assist-event", e));
+}
+
+// --- Git-Tab (Transparenz) ---------------------------------------------------
+
+export function useGitStates() {
+  return useQuery({
+    queryKey: ["git-states"],
+    queryFn: () => apiFetch<{ states: GitStateRow[] }>("/api/git"),
+  });
+}
+
+// Live-Refresh EINES Projekts (~1 s): aktualisiert den Cache und liefert
+// ahead/behind zum lokal bekannten Remote-Stand mit.
+export function useGitRefresh() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { project: string }) => apiPost<GitRefreshResult>("/api/git-refresh", v),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["git-states"] }),
+  });
 }

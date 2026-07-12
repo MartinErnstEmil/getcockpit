@@ -57,3 +57,17 @@ export function collectGitState(cwd: string): GitStateInput | null {
     recentCommits,
   };
 }
+
+// Vorsprung/Rückstand zum Upstream (Git-Tab, live auf Abruf — bewusst NICHT im
+// git_state-Cache: das Schema ist eingefroren, und der Wert veraltet ohnehin
+// mit jedem fetch/push). Kein Netzwerkzugriff — verglichen wird gegen den
+// lokal bekannten Remote-Stand. null = kein Upstream konfiguriert / kein Repo.
+export function collectAheadBehind(cwd: string): { ahead: number; behind: number } | null {
+  try {
+    const out = git(cwd, ["rev-list", "--count", "--left-right", "@{u}...HEAD"]);
+    const [behind = "0", ahead = "0"] = out.split(/\s+/);
+    return { ahead: Number(ahead) || 0, behind: Number(behind) || 0 };
+  } catch {
+    return null;
+  }
+}

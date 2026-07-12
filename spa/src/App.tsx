@@ -12,6 +12,7 @@ const InboxPage = lazy(() => import("./routes/InboxPage"));
 const DecisionsPage = lazy(() => import("./routes/DecisionsPage"));
 const SearchPage = lazy(() => import("./routes/SearchPage"));
 const SessionsPage = lazy(() => import("./routes/SessionsPage"));
+const GitPage = lazy(() => import("./routes/GitPage"));
 const FilesPage = lazy(() => import("./routes/FilesPage"));
 const ReportPage = lazy(() => import("./routes/ReportPage"));
 const SettingsPage = lazy(() => import("./routes/SettingsPage"));
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/search" element={<SearchPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionsPage />} />
+        <Route path="/git" element={<GitPage />} />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/files/:key" element={<FilesPage />} />
         <Route path="/report" element={<ReportPage />} />

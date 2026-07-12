@@ -15,6 +15,7 @@ import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget } from "./config.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
+import { collectAheadBehind, collectGitState } from "./gitinfo.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
 import type { ClaudeCmd } from "./standup.js";
 import type { Store } from "./store.js";
@@ -287,6 +288,11 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     if (req.method === "GET" && url.pathname === "/api/projects") {
       return sendJson(res, 200, { projects: store.projectAdminList() });
     }
+    // Git-Tab (Transparenz): der git_state-Cache aller Projekte. Der Stop-Hook
+    // füllt ihn opportunistisch; gezielt frisch macht POST /api/git-refresh.
+    if (req.method === "GET" && url.pathname === "/api/git") {
+      return sendJson(res, 200, { states: store.listGitStates() });
+    }
     // Verlauf (Phase 5): Session-Liste + Raw-Turns einer Session.
     if (req.method === "GET" && url.pathname === "/api/sessions") {
       const sessions = store.listSessions({
@@ -481,6 +487,29 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
         missing: resolved.missing,
         copyOnly: resolved.copyOnly,
       });
+    }
+
+    // Git-Tab: Zustand EINES Projekts live erheben (Budget wie im Stop-Hook,
+    // ~1 s worst case) und den Cache aktualisieren. ahead/behind kommt nur
+    // hier (live, gegen den lokal bekannten Remote-Stand — kein Netz) und
+    // wird bewusst nicht persistiert (Schema-Freeze; veraltet mit jedem push).
+    // Nur bekannte Projekte (turns ∪ items) — nie beliebige Pfade shellen.
+    if (url.pathname === "/api/git-refresh") {
+      const project = (body as { project?: string }).project ?? "";
+      if (!project) return sendJson(res, 400, { error: "project fehlt" });
+      const known = store
+        .rawDb()
+        .prepare(
+          `SELECT 1 FROM turns WHERE project_path = ?
+           UNION SELECT 1 FROM items WHERE project_path = ? LIMIT 1`,
+        )
+        .get(project, project);
+      if (!known) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const state = collectGitState(project);
+      if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
+      store.upsertGitState(state);
+      const fresh = store.listGitStates().find((s) => s.projectPath === project) ?? null;
+      return sendJson(res, 200, { state: fresh, aheadBehind: collectAheadBehind(project) });
     }
 
     // Banner-Klickpfad: disableAllHooks aus der settings.json entfernen —

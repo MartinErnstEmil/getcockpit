@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Copy, Sparkles } from "lucide-react";
+import { Copy, Rocket, Sparkles } from "lucide-react";
 import { useScope } from "@/lib/useScope";
 import { isActionable, scopeToParams } from "@/lib/scope";
 import { useScopedStatus, useScopedItems } from "@/lib/useScopedData";
@@ -83,6 +83,52 @@ function ProjectBriefing({ project, keep }: { project: string; keep: (p: string 
     await navigator.clipboard.writeText(md);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  // Session-Prompt für eine AUTONOME Claude-Code-Session (PO 11.07.):
+  // Briefing-Kontext + bindende Arbeitsregeln — /simplify nach jedem Paket,
+  // Abschluss-Dokumentation und Übergabe (Learnings/Fragen/Ergebnis) über die
+  // Cockpit-MCP-Tools. Deterministisch komponiert, per Copy in die Session.
+  const [sessionPrompt, setSessionPrompt] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  function buildSessionPrompt(): string {
+    return [
+      `Du arbeitest autonom im Projekt ${project}.`,
+      "",
+      "## Ausgangslage (Cockpit-Briefing)",
+      deterministicMd(),
+      ...(briefOut ? ["", "## Stand + nächste Schritte (KI-Zusammenfassung)", briefOut.report] : []),
+      "",
+      "## Auftrag",
+      "Arbeite die offenen Punkte oben ab — Blocker und \"Wartet auf dich\" zuerst,",
+      "dann die nächsten Schritte aus der Zusammenfassung. Kleine, in sich",
+      "abgeschlossene Pakete; nach jedem Paket alle Gates.",
+      "",
+      "## Arbeitsregeln (bindend)",
+      "1. Gates nach JEDEM Paket: Tests + Typecheck (und Build, wo vorhanden) —",
+      "   keine Gates aufweichen, keine .skip.",
+      "2. /simplify an nützlichen Stellen: nach jedem inhaltlich abgeschlossenen",
+      "   Paket einen /simplify-Lauf über den Paket-Diff (Reuse, Vereinfachung,",
+      "   Altitude) und die Findings direkt anwenden, BEVOR du weitermachst.",
+      "3. Cockpit ist dein Kanal zum Menschen (MCP-Server \"cockpit\"):",
+      "   - Fragen, Blocker und Vorschläge sofort als add_item ablegen (Typ",
+      "     präzise, anchor auf Datei:Zeile) — nie im Chat-Text begraben.",
+      "   - Vor Architektur-Entscheidungen: search_decisions.",
+      "   - Wartest du auf eine Antwort: pickup_answers vor dem nächsten Schritt.",
+      "4. Session-Abschluss (Pflicht, bevor du endest):",
+      "   - EIN result-Item: was getan, was offen, Gates-Stand.",
+      "   - Learnings/Erkenntnisse als je ein kurzes fyi-Item.",
+      "   - Offene Fragen als question-Items.",
+      "   - Repo-Doku aktualisieren, wo die Arbeit sie veraltet hat.",
+    ].join("\n");
+  }
+
+  async function copyPrompt() {
+    if (!sessionPrompt) return;
+    await navigator.clipboard.writeText(sessionPrompt);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 2000);
   }
 
   return (
@@ -186,6 +232,36 @@ function ProjectBriefing({ project, keep }: { project: string; keep: (p: string 
         )}
         {!briefOut && !brief.isPending && !brief.isError && (
           <p className="mt-1.5 text-xs text-ink-2">Fasst die letzten 7 Tage zusammen und bewertet die nächsten Schritte — ohne Jargon.</p>
+        )}
+      </div>
+
+      {/* Autonome Session: fertiger Prompt aus Briefing-Kontext + bindenden
+          Arbeitsregeln (/simplify je Paket, Abschluss-Übergabe ans Cockpit). */}
+      <div className="ds-card mt-3 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">Autonome Session starten</span>
+          <button
+            type="button"
+            onClick={() => setSessionPrompt(buildSessionPrompt())}
+            className="ds-btn-tertiary ml-auto flex items-center gap-1.5"
+          >
+            <Rocket className="h-3.5 w-3.5" />
+            {sessionPrompt ? "Prompt neu erzeugen" : "Session-Prompt erzeugen"}
+          </button>
+          {sessionPrompt && (
+            <button type="button" onClick={() => void copyPrompt()} className="ds-btn-primary flex items-center gap-1.5">
+              <Copy className="h-3.5 w-3.5" /> {promptCopied ? "Kopiert!" : "Prompt kopieren"}
+            </button>
+          )}
+        </div>
+        {sessionPrompt ? (
+          <pre className="mt-2 max-h-[420px] max-w-[90ch] overflow-y-auto whitespace-pre-wrap border border-line bg-panel px-3 py-2 text-xs leading-relaxed text-ink-2">{sessionPrompt}</pre>
+        ) : (
+          <p className="mt-1.5 text-xs text-ink-2">
+            Erzeugt einen kopierfertigen Auftrag für eine autonome Claude-Code-Session: Briefing-Kontext
+            {briefOut ? " inkl. KI-Zusammenfassung" : " (KI-Zusammenfassung wird eingebettet, wenn vorhanden)"} plus
+            bindende Regeln — /simplify nach jedem Paket, Abschluss-Übergabe (Ergebnis, Learnings, offene Fragen) ans Cockpit.
+          </p>
         )}
       </div>
     </div>

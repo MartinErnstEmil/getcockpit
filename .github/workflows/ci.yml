@@ -1,0 +1,23 @@
+# CI-Gate auf GitHub: dasselbe Grün wie lokal (Build + Vitest) bei jedem Push —
+# das Remote-Gegenstück zur lokalen Gate-Disziplin. Kein Deploy, nur Wahrheit.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run
+      - run: npm run typecheck:spa

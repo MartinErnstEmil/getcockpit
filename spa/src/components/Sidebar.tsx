@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Inbox, GitBranch, Search, History, FileText, BookOpen, ClipboardList } from "lucide-react";
+import { LayoutDashboard, Inbox, GitBranch, GitCommitHorizontal, Search, History, FileText, BookOpen, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useScope } from "@/lib/useScope";
@@ -17,6 +17,7 @@ const NAV: Array<{ to: string; key: string; Icon: typeof Inbox; badge?: "inbox" 
   { to: "/search", key: "nav.search", Icon: Search },
   { to: "/report", key: "nav.report", Icon: BookOpen },
   { to: "/sessions", key: "nav.sessions", Icon: History },
+  { to: "/git", key: "nav.git", Icon: GitCommitHorizontal },
   { to: "/files", key: "nav.files", Icon: FileText },
 ];
 

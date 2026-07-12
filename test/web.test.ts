@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server } from "node:http";
 import { request } from "node:http";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createWebServer, newWebToken } from "../src/web.js";
@@ -387,5 +388,49 @@ describe("Deep-Link- und Viewer-Endpunkte (Inbox-Rework 09.07.)", () => {
     writeFileSync(join(ts.dir, "internal", "docs", "id_rsa"), "kein-schluessel", "utf8");
     const denied = await fetch(url(`/api/file?path=docs/id_rsa&project=${encodeURIComponent(ts.dir)}`));
     expect(denied.status).toBe(403);
+  });
+
+  it("Git-Tab: /api/git-refresh erhebt live und füllt den Cache für /api/git", async () => {
+    // Echtes Mini-Repo als erfasstes Projekt (Muster aus views.test).
+    const repo = join(ts.dir, "git-tab-repo");
+    mkdirSync(repo, { recursive: true });
+    const run = (args: string[]): string => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    run(["init", "-q"]);
+    run(["config", "user.email", "t@example.com"]);
+    run(["config", "user.name", "t"]);
+    writeFileSync(join(repo, "a.txt"), "eins", "utf8");
+    run(["add", "."]);
+    run(["commit", "-q", "-m", "git-tab commit"]);
+    ts.store.insertTurn({
+      uuid: "t-gittab",
+      sessionId: "s-gittab",
+      projectPath: repo,
+      role: "user",
+      content: "git tab",
+      timestamp: new Date().toISOString(),
+    });
+
+    const refresh = await fetch(url("/api/git-refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ project: repo.replace(/\\/g, "/").replace(/^([A-Z]):/, (m) => m.toLowerCase()) }),
+    });
+    expect(refresh.status).toBe(200);
+    const body = (await refresh.json()) as { state: { branch: string | null; recentCommits: Array<{ subject: string }> }; aheadBehind: unknown };
+    expect(body.state.recentCommits[0]!.subject).toBe("git-tab commit");
+    // Frisches Repo ohne Remote: ahead/behind ist ehrlich null, nie geraten.
+    expect(body.aheadBehind).toBeNull();
+
+    const list = await fetch(url("/api/git"));
+    const states = ((await list.json()) as { states: Array<{ projectPath: string }> }).states;
+    expect(states.some((s) => s.projectPath.endsWith("git-tab-repo"))).toBe(true);
+
+    // Unbekannte Projekte werden NIE geshellt.
+    const unknown = await fetch(url("/api/git-refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ project: "c:/nicht/erfasst" }),
+    });
+    expect(unknown.status).toBe(400);
   });
 });

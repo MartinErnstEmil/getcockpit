@@ -279,3 +279,26 @@ export interface ComposerApplyResult {
   missing: string[];
   copyOnly: SnippetMeta[];
 }
+
+// --- Git-Tab (Transparenz) ---------------------------------------------------
+
+export interface GitStateRow {
+  projectPath: string;
+  headSha: string | null;
+  branch: string | null;
+  dirtyFiles: number;
+  lastCommitAt: string | null;
+  recentCommits: Array<{ sha: string; at: string; subject: string }>;
+  updatedAt: string;
+}
+
+export interface AheadBehind {
+  ahead: number;
+  behind: number;
+}
+
+export interface GitRefreshResult {
+  state: GitStateRow | null;
+  // null = kein Upstream konfiguriert (z. B. lokales Repo ohne Remote).
+  aheadBehind: AheadBehind | null;
+}
