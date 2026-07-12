@@ -1,8 +1,9 @@
 # Cockpit — Testprotokoll (Volltest)
 
-Stand: 2026-07-09. Jeder Fall: Schritte ausführen, Ergebnis gegen „Erwartet"
-prüfen, PASS/FAIL + Beleg notieren. Grundlage für die Tester-Abnahme und für
-jede Regressionsrunde vor einem Release.
+Stand: 2026-07-12 · Version 0.3.0. Jeder Fall: Schritte ausführen, Ergebnis
+gegen „Erwartet" prüfen, PASS/FAIL + Beleg notieren. Grundlage für die
+Tester-Abnahme und für jede Regressionsrunde vor einem Release. Neu in 0.3.0:
+Git-Modi je Projekt (Abschnitt I) und Zustell-Transparenz (Abschnitt J).
 
 **Regeln für den Tester:**
 - Basis-URL: `http://127.0.0.1:7878` (Token beim ersten Aufruf in der URL).
@@ -19,7 +20,7 @@ jede Regressionsrunde vor einem Release.
 | Nr | Fall | Schritte | Erwartet |
 |----|------|----------|----------|
 | A1 ⚠ | init | `cockpit init` (frische Maschine/VM) | Hook-Bundle installiert, settings.json-Diff angezeigt + Rückfrage, Backup angelegt, MCP registriert (oder manueller Befehl genannt), „Nächste Schritte" gedruckt |
-| A2 | doctor | `node dist/cli.js doctor` | 5 Checks, alle OK auf eingerichteter Maschine; bei Fehlern konkreter Fix-Befehl |
+| A2 | doctor | `node dist/cli.js doctor` | Mehrere Checks (Node, FTS5, DB, Hook-Bundle, Hooks registriert + nicht global aus; mit Spawn zusätzlich `claude`-Binary, MCP-Registrierung, Zustell-Kette end-to-end), alle OK auf eingerichteter Maschine; bei Fehlern konkreter Fix-Befehl |
 | A3 | backfill dry-run | `node dist/cli.js backfill --dry-run --limit 20` | Report mit Dateien/Turns/Skips/Redactions; zählt Redactions wie der Echtlauf; DB unverändert |
 | A4 | backfill idempotent | `backfill --limit 20` zweimal | Zweiter Lauf erzeugt 0 neue Turns |
 | A5 | stats | `node dist/cli.js stats` | Turns/Projekte/Sessions, Items nach Status, Events nach Typ |
@@ -108,10 +109,44 @@ jede Regressionsrunde vor einem Release.
 | H3 | Traversal | /api/file mit ../ bzw. encodierten Punkten → 403/404, nie Inhalt außerhalb der Wurzeln |
 | H4 | Fehlerbilder | Unbekannte id → 404, kaputtes JSON → 400 (nie 500); /api/brief parallel → 429 |
 
-## Bekannte Lücken (Stand 09.07., vor Tester-Übergabe schließen)
+## I. Git-Modi je Projekt (neu 0.3.0)
 
-1. doctor prüft NICHT, ob ein `claude`-Binary erreichbar ist (KI-Features
-   degradieren dann kommentarlos) — Check ergänzen.
-2. doctor warnt NICHT bei `disableAllHooks: true` (Hooks registriert, aber
-   wirkungslos — Capture und Zustellung stehen).
-3. doctor prüft die MCP-Registrierung nicht (init meldet Fehlschlag nur einmalig).
+Modus schaltbar in **Einstellungen → Projekte** (Git-Select je Zeile);
+überall sonst nur Anzeige. Default „beratend" = bisheriges Verhalten.
+I4/I5 in einem **Wegwerf-/Test-Repo** ausführen (schreibt einen Git-Ref).
+
+| Nr | Fall | Schritte | Erwartet |
+|----|------|----------|----------|
+| I1 | Modus schalten | Einstellungen → Projekte: Git-Select auf manuell/beratend/auto; (i)-Panel öffnen | Auswahl bleibt nach Reload; Git-Tab zeigt den Modus als Chip (Klick → Einstellungen); (i) erklärt die drei Modi |
+| I2 | manuell unterdrückt | Projekt mit ungesicherten Dateien auf „manuell" | Git-Tab: Branch/dirty/Commits sichtbar, ABER keine Hinweiszeile („Commit fällig?"); Übersicht ohne Git-Empfehlung für dieses Projekt |
+| I3 | beratend zeigt | Projekt auf „beratend", ungesicherte Dateien | Git-Tab-Hinweiszeile + Übersichts-Empfehlung; Session-Prompt (Briefing) enthält die Git-Regel |
+| I4 | auto-Snapshot | Projekt (Test-Repo) auf „auto"; echte Claude-Session mit ungesicherter Datei; danach `git for-each-ref refs/cockpit/` | Genau ein neuer `refs/cockpit/wip-<Datum-Zeit>`; `git status`/HEAD/Index UNVERÄNDERT (kein Branch berührt, kein Push); Git-Tab „letzter Snapshot: …" nach „Aktualisieren" |
+| I5 | Snapshot ansehen/zurückholen | `git log refs/cockpit/wip-<…>`; optional `git cherry-pick <sha>` | Der ungesicherte Stand steckt im Snapshot-Commit; cherry-pick bringt ihn zurück |
+| I6 | auto Dedupe/Prune | (automatisiert, test/hooks.test.ts) | Zweiter Stop ohne Änderung → kein neuer Ref; >20 Snapshots → Prune auf 20 |
+
+## J. Zustell-Transparenz (neu 0.3.0)
+
+Sichtbarkeit der Antwort-Zustellung: Quittung je Karte, Erinnerung an
+Liegengebliebenes, Selbsttest der Kette. Mit `[TEST]`-Items arbeiten.
+
+| Nr | Fall | Schritte | Erwartet |
+|----|------|----------|----------|
+| J1 | Quittung „wartet" | `[TEST]`-Frage beantworten, NICHT abholen; Karte über Deep-Link `?item=<id>` bzw. im Entscheidungs-Log öffnen | Unter der Antwort: „Wartet auf Abholung · <alter>"; ab >24 h zusätzlich „— Session starten oder kopieren" + Kopier-Knopf |
+| J2 | Quittung „zugestellt" | Dieselbe Frage über eine neue Session desselben Projekts abholen (Briefing) | Quittung wechselt auf „Zugestellt · <alter> · beim Session-Start" + Session-Kurz-Id als Verlauf-Link |
+| J3 | (i)-Panel | needsAnswer-Karte öffnen, (i) anklicken | Erklärt Speichern/Zustellen UND die drei automatischen Wege (Session-Start / laufende Session / Agent holt ab) |
+| J4 | Übersichts-Empfehlung | Eine Antwort >2 h unabgeholt lassen; Übersicht öffnen | Empfehlung „N beantwortete Antwort(en) seit >2 h nicht abgeholt"; CTA „Zum Entscheidungs-Log" → /decisions |
+| J5 | Selbsttest (Web) | Einstellungen → „Zustellung testen" | Grün „Zustell-Kette funktioniert (N ms)" ODER rot mit Klartext-Grund (z. B. veraltetes Bundle → `cockpit init` neu ausführen). Isoliert, ohne echte Daten |
+| J6 | Selbsttest (CLI) | `node dist/cli.js doctor` | Check „Zustell-Kette end-to-end" grün (spawnt das Bundle gegen eine Temp-DB) |
+| J7 | Heute-Band | Nach einer Abholung die Übersicht öffnen | „Heute"-Band zeigt zusätzlich „· N Antworten abgeholt" |
+
+## Bekannte Lücken
+
+Die drei Lücken vom 09.07. sind geschlossen: doctor prüft jetzt das
+`claude`-Binary, warnt bei `disableAllHooks: true`, prüft die MCP-Registrierung
+und testet die Zustell-Kette end-to-end (Fälle A2, J6). Aktuell keine offenen
+Blocker vor der Tester-Übergabe.
+
+Bewusste Design-Entscheidungen (kein Bug): die Empfehlung aus J4 führt in den
+Entscheidungs-Log statt in die Inbox (die Inbox listet nur Offenes); ob das
+Modell eine injizierte Antwort tatsächlich verarbeitet, wird NICHT quittiert
+(nur die Injektion) — siehe DECISIONS.md D11.
