@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { DEFAULT_ACTIVE_DAYS } from "@/lib/scope";
 import { useScope } from "@/lib/useScope";
-import { useComposerApply, useConfig, useFile, useSnippets } from "@/api/queries";
+import { useComposerApply, useConfig, useFile, useSnippets, useWriteFile } from "@/api/queries";
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
 import { fileHref, vscHref } from "@/lib/linkify";
@@ -103,9 +103,29 @@ function DiffBlock({ e }: { e: ConfigEntry }) {
 
 function FileViewer({ path, line, project }: { path: string; line: number | null; project: string | null }) {
   const q = useFile(path, project);
+  const write = useWriteFile();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saved, setSaved] = useState(false);
+
   if (q.error) return <div className="p-5"><ErrorBox error={q.error} onRetry={() => void q.refetch()} /></div>;
   if (q.isLoading) return <EmptyState title="Lädt…" />;
-  const lines = (q.data?.content ?? "").split("\n");
+  const content = q.data?.content ?? "";
+  const lines = content.split("\n");
+  // Gekürzte Dateien (>512 KB) dürfen NICHT editiert werden — Speichern würde
+  // den vollen Inhalt durch den gekürzten ersetzen (Datenverlust).
+  const canEdit = !!q.data?.file && !q.data.truncated;
+
+  const startEdit = () => { setDraft(content); setEditing(true); setSaved(false); };
+  const save = () => {
+    if (!q.data?.file) return;
+    // Der AUFGELÖSTE Absolutpfad geht zurück — nicht der (evtl. veraltete)
+    // Anfrage-Pfad; so trifft das Schreiben exakt die angezeigte Datei.
+    write.mutate({ path: q.data.file, content: draft }, {
+      onSuccess: () => { setEditing(false); setSaved(true); void q.refetch(); setTimeout(() => setSaved(false), 2500); },
+    });
+  };
+
   return (
     <div className="mx-auto max-w-[1120px] px-5 py-5">
       <h2 className="mb-3 flex flex-wrap items-baseline gap-2 text-[15px] font-semibold">
@@ -122,15 +142,54 @@ function FileViewer({ path, line, project }: { path: string; line: number | null
           </a>
         )}
         {q.data?.truncated && <span className="ds-tag">gekürzt auf 512 KB</span>}
+        {!editing && canEdit && (
+          <button type="button" onClick={startEdit} className="ds-btn-ghost border border-line ml-auto !px-3 text-xs">
+            Bearbeiten
+          </button>
+        )}
+        {saved && <span className="ml-auto text-xs text-ok">Gespeichert.</span>}
       </h2>
-      <div className="ds-card overflow-x-auto px-0 py-2 font-mono text-xs leading-relaxed">
-        {lines.map((l, i) => (
-          <div key={i} className={cn("flex gap-3 px-3", line === i + 1 && "bg-hl")}>
-            <span className="w-10 shrink-0 select-none text-right tabular-nums text-ink-2">{i + 1}</span>
-            <span className="whitespace-pre-wrap">{l}</span>
+
+      {editing ? (
+        <div>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            className="ds-field min-h-[60vh] w-full resize-y font-mono text-xs leading-relaxed"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" disabled={write.isPending} onClick={save} className="ds-btn-primary">
+              {write.isPending ? "Speichert…" : "Speichern"}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="ds-btn-ghost border border-line">
+              Abbrechen
+            </button>
+            {write.isError && (
+              <span className="text-xs text-crit">
+                {write.error instanceof Error ? write.error.message : "Fehler"} — erneut versuchen.
+              </span>
+            )}
+            <span className="ml-auto text-xs text-ink-2">Vorher-Stand wird als Backup in ~/.cockpit gesichert.</span>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <>
+          <div className="ds-card overflow-x-auto px-0 py-2 font-mono text-xs leading-relaxed">
+            {lines.map((l, i) => (
+              <div key={i} className={cn("flex gap-3 px-3", line === i + 1 && "bg-hl")}>
+                <span className="w-10 shrink-0 select-none text-right tabular-nums text-ink-2">{i + 1}</span>
+                <span className="whitespace-pre-wrap">{l}</span>
+              </div>
+            ))}
+          </div>
+          {q.data?.truncated && (
+            <p className="mt-2 text-xs text-warn">
+              Datei ist gekürzt angezeigt (über 512 KB) — Bearbeiten ist deaktiviert, um Datenverlust zu vermeiden.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

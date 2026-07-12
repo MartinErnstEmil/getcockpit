@@ -3,7 +3,7 @@
 // die CLAUDE.md mit Zeichen-Budget und Git-Diff (neue Einträge / Streichungen
 // seit HEAD). Dazu der gehärtete Datei-Lesepfad für den internen Viewer.
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { cockpitHome, normalizeProjectPath } from "./paths.js";
@@ -121,7 +121,15 @@ export type FileReadResult =
   | { ok: true; file: string; content: string; truncated: boolean }
   | { ok: false; status: number; error: string };
 
-export function readViewerFile(store: Store, rawPath: string, project?: string): FileReadResult {
+// Gemeinsame, gehärtete Pfad-Auflösung für Lesen UND Schreiben: Allowlist-
+// Wurzeln, Anker für Relativpfade, decode→resolve→within-root (Auflage T5),
+// Secret-Sperre. KEINE Existenz- und KEINE toleranten-Fallback-Entscheidung —
+// die trifft der Aufrufer (Lesen darf fuzzy nachschlagen, Schreiben NIE).
+type ResolveResult =
+  | { ok: true; requested: string; roots: string[] }
+  | { ok: false; status: number; error: string };
+
+function resolveTargetPath(store: Store, rawPath: string, project?: string): ResolveResult {
   const db = store.rawDb();
   // Wurzeln aus turns UND items: ein Projekt kann Items tragen, ohne dass je
   // ein Turn erfasst wurde (z. B. nur MCP-Zugriffe) — dessen Datei-Links
@@ -139,8 +147,7 @@ export function readViewerFile(store: Store, rawPath: string, project?: string):
   // Relativpfade (aus Item-Texten verlinkt) gegen die mitgegebene Projekt-
   // wurzel ankern — resolve() allein ankert an der Server-cwd und liefert
   // dann 404 bzw. bei Namenskollision still die falsche Datei. Die Wurzel
-  // muss aus der Allowlist stammen; Sicherheitsgrenze bleibt der
-  // inRoot-Check unten (decode→resolve→within-root, Auflage T5).
+  // muss aus der Allowlist stammen; Sicherheitsgrenze bleibt der inRoot-Check.
   let anchored = rawPath;
   if (!isAbsolute(rawPath) && project) {
     const root = resolve(normalizeProjectPath(project));
@@ -159,8 +166,18 @@ export function readViewerFile(store: Store, rawPath: string, project?: string):
     return reqCmp === rootCmp || reqCmp.startsWith(rootCmp + sep);
   });
   if (!inRoot) return { ok: false, status: 403, error: "Pfad liegt außerhalb der erfassten Projekte" };
-  const base = requested.split(sep).pop() ?? "";
-  if (DENY_BASENAME.test(base)) return { ok: false, status: 403, error: "Datei ist gesperrt (Secrets)" };
+  if (DENY_BASENAME.test(basename(requested))) {
+    return { ok: false, status: 403, error: "Datei ist gesperrt (Secrets)" };
+  }
+  return { ok: true, requested, roots };
+}
+
+export function readViewerFile(store: Store, rawPath: string, project?: string): FileReadResult {
+  const r = resolveTargetPath(store, rawPath, project);
+  if (!r.ok) return r;
+  const { requested, roots } = r;
+  const reqCmp = requested.toLowerCase();
+  const base = basename(requested);
   let target = requested;
   if (!existsSync(target) || !statSync(target).isFile()) {
     // Tolerante Auflösung: Item-Texte speichern Pfade, die veralten, sobald
@@ -196,6 +213,52 @@ export function readViewerFile(store: Store, rawPath: string, project?: string):
     content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8"),
     truncated,
   };
+}
+
+// Toolchain-Config, die Cockpit/Claude selbst pflegen: über den Editor
+// gesperrt, weil ein kaputter Edit (malformed JSON) die Installation lahmlegt
+// — dafür gibt es cockpit init/uninstall bzw. `claude mcp`. Nur WRITE-seitig;
+// Lesen bleibt erlaubt.
+const WRITE_DENY_BASENAME = /^settings\.json$|^settings\.local\.json$|^\.claude\.json$/i;
+const MAX_WRITE_BYTES = 2 * 1024 * 1024; // 2 MB — ein Editor-Save, kein Bulk-Dump
+
+// Datei-Editor (PO 12.07.): eine im Viewer angezeigte Datei überschreiben.
+// Sicherheit wie beim Lesen (Allowlist, Secret-Sperre, Traversal), PLUS:
+// KEIN toleranter Basename-Fallback (nie eine fuzzy-aufgelöste falsche Datei
+// überschreiben — der Client schickt den aufgelösten Absolutpfad zurück),
+// nur EXISTIERENDE Textdateien (kein Anlegen), Toolchain-Config gesperrt,
+// Vorversion als Backup nach ~/.cockpit/file-backups (außerhalb der Projekt-
+// ordner, damit nichts versehentlich commitet wird).
+export function writeViewerFile(
+  store: Store,
+  rawPath: string,
+  project: string | undefined,
+  content: string,
+): FileReadResult {
+  const r = resolveTargetPath(store, rawPath, project);
+  if (!r.ok) return r;
+  const target = r.requested;
+  if (WRITE_DENY_BASENAME.test(basename(target))) {
+    return { ok: false, status: 403, error: "Diese Datei pflegt Cockpit/Claude selbst — über den Editor gesperrt (settings.json u. ä.)." };
+  }
+  if (!existsSync(target) || !statSync(target).isFile()) {
+    return { ok: false, status: 404, error: "Datei existiert nicht (Anlegen über den Viewer ist nicht möglich)." };
+  }
+  if (content.includes(String.fromCharCode(0))) return { ok: false, status: 415, error: "Binärinhalt nicht erlaubt." };
+  if (Buffer.byteLength(content, "utf8") > MAX_WRITE_BYTES) {
+    return { ok: false, status: 413, error: "Inhalt zu groß (max. 2 MB)." };
+  }
+  try {
+    const backupDir = join(cockpitHome(), "file-backups");
+    mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    copyFileSync(target, join(backupDir, `${stamp}__${basename(target).replace(/[^\w.-]/g, "_")}.bak`));
+  } catch {
+    // Backup ist ein Sicherheitsnetz, kein Muss — ein Fehler hier (z. B. Rechte)
+    // darf das vom Nutzer ausdrücklich gewollte Speichern nicht blockieren.
+  }
+  writeFileSync(target, content, "utf8");
+  return { ok: true, file: normalizeProjectPath(target), content, truncated: false };
 }
 
 // Begrenzte Basename-Suche unter einer Allowlist-Wurzel: liefert den Pfad nur

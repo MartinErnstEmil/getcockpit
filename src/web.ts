@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { cockpitHome } from "./paths.js";
 import { ASSIST_KINDS, ASSIST_LANGS, ASSIST_PERSONAS, runAssist, type AssistKind, type AssistLang, type AssistPersona } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
-import { configView, readViewerFile, resolveClaudeMdTarget } from "./config.js";
+import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
 import { collectAheadBehind, collectGitState } from "./gitinfo.js";
@@ -458,6 +458,26 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       const report = store.purge(project);
       store.recordEvent({ eventType: "project_delete", projectPath: project, payload: report });
       return sendJson(res, 200, { report, projects: store.projectAdminList() });
+    }
+
+    // Datei-Editor (PO 12.07.): eine im Viewer angezeigte Datei überschreiben.
+    // Trägt path/content statt id (daher vor dem id-Zwang). Die POST-Härtung
+    // (Origin, JSON-Content-Type, Token) lief bereits; die Pfad-/Secret-/
+    // Traversal-Sicherheit sitzt in writeViewerFile. Der Client schickt den
+    // AUFGELÖSTEN Absolutpfad (aus dem vorherigen Read) zurück, damit kein
+    // toleranter Fallback beim Schreiben nötig ist.
+    if (url.pathname === "/api/file-write") {
+      const b = body as { path?: string; project?: string; content?: string };
+      if (!b.path) return sendJson(res, 400, { error: "path fehlt" });
+      if (typeof b.content !== "string") return sendJson(res, 400, { error: "content fehlt" });
+      const result = writeViewerFile(store, b.path, b.project ?? undefined, b.content);
+      if (!result.ok) return sendJson(res, result.status, { error: result.error });
+      store.recordEvent({
+        eventType: "file_write",
+        projectPath: b.project ?? "",
+        payload: { file: result.file, bytes: Buffer.byteLength(b.content, "utf8") },
+      });
+      return sendJson(res, 200, { file: result.file });
     }
 
     // Config-Baukasten Apply (U6): Snippets in eine CLAUDE.md mergen. Trägt

@@ -251,6 +251,20 @@ export function useFile(path: string | null, project?: string | null) {
   });
 }
 
+// Datei-Editor: eine im Viewer angezeigte Datei überschreiben. `path` ist der
+// aufgelöste Absolutpfad aus dem Read (kein toleranter Fallback beim Schreiben).
+export function useWriteFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { path: string; content: string }) =>
+      apiPost<{ file: string }>("/api/file-write", v),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["file"] });
+      void qc.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
 // Verlauf: Session-Liste + Raw-Turns einer Session (Phase 5).
 export function useSessions(scope: Scope) {
   const project = scope.mode === "single" ? scope.project : "";

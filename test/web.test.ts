@@ -390,6 +390,38 @@ describe("Deep-Link- und Viewer-Endpunkte (Inbox-Rework 09.07.)", () => {
     expect(denied.status).toBe(403);
   });
 
+  it("/api/file-write überschreibt existierende Dateien; sperrt Secrets/Config/Neuanlage", async () => {
+    ts.store.insertTurn({
+      uuid: "t-write", sessionId: "s-write", projectPath: ts.dir,
+      role: "user", content: "x", timestamp: "2026-07-12T08:00:00Z",
+    });
+    const { readFileSync } = await import("node:fs");
+    const post = (b: unknown) => fetch(url("/api/file-write"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify(b),
+    });
+
+    const f = join(ts.dir, "editme.md");
+    writeFileSync(f, "alt", "utf8");
+    const ok = await post({ path: f, content: "neu mit leerzeichen\nund zeile 2" });
+    expect(ok.status).toBe(200);
+    expect(readFileSync(f, "utf8")).toBe("neu mit leerzeichen\nund zeile 2");
+
+    // Nicht existierende Datei: kein Anlegen über den Viewer.
+    expect((await post({ path: join(ts.dir, "gibtsnicht.md"), content: "x" })).status).toBe(404);
+    // Toolchain-Config gesperrt.
+    writeFileSync(join(ts.dir, "settings.json"), "{}", "utf8");
+    expect((await post({ path: join(ts.dir, "settings.json"), content: "{}" })).status).toBe(403);
+    // Secret-Basename gesperrt.
+    writeFileSync(join(ts.dir, ".env"), "K=V", "utf8");
+    expect((await post({ path: join(ts.dir, ".env"), content: "K=W" })).status).toBe(403);
+    // Außerhalb der Allowlist.
+    expect((await post({ path: "c:/nicht/erfasst/x.md", content: "y" })).status).toBe(403);
+    // Fehlende Felder.
+    expect((await post({ content: "y" })).status).toBe(400);
+  });
+
   it("Git-Tab: /api/git-refresh erhebt live und füllt den Cache für /api/git", async () => {
     // Echtes Mini-Repo als erfasstes Projekt (Muster aus views.test).
     const repo = join(ts.dir, "git-tab-repo");
