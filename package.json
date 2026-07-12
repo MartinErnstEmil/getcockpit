@@ -36,7 +36,8 @@
     "build:server": "tsc && node scripts/build-hooks.mjs",
     "test": "npm run build:server && vitest run",
     "typecheck": "tsc --noEmit",
-    "typecheck:spa": "npm -w @getcockpit/cockpit-spa run typecheck"
+    "typecheck:spa": "npm -w @getcockpit/cockpit-spa run typecheck",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

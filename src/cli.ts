@@ -222,6 +222,7 @@ program
       console.log(`${c.ok ? "OK " : "FEHLT"}  ${c.label}${c.ok ? "" : `\n       Fix: ${c.fix}`}`);
     }
     if (checks.some((c) => !c.ok)) process.exitCode = 1;
+    else console.log("\nAlles bereit. Oberfläche öffnen: cockpit web");
   });
 
 program

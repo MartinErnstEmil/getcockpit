@@ -100,6 +100,7 @@ export async function cmdInit(opts: InitOptions = {}): Promise<InitReport> {
   out("  1. cockpit backfill --dry-run   (Redaction-Report sichten)");
   out("  2. cockpit backfill             (Historie importieren)");
   out("  3. cockpit doctor               (Installation prüfen)");
+  out("  4. cockpit web                  (Oberfläche im Browser öffnen)");
   return {
     aborted: false,
     bundleInstalled: bundle,
