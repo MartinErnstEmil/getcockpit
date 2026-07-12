@@ -66,6 +66,9 @@ export interface PortfolioView {
   // Offene Items älter als 7 Tage (U1): "Jetzt dran" zeigt das Neueste zuerst,
   // dieser Zähler macht die verdeckte Alt-Last ehrlich sichtbar (Link in die Inbox).
   olderOpen: number;
+  // Menschlich beantwortete Antworten, die seit über 2 h nicht abgeholt wurden
+  // (Zustell-Transparenz): treibt die Übersichts-Empfehlung "nichts liegt still".
+  undeliveredAnswers: number;
 }
 
 interface TurnAgg {
@@ -230,7 +233,8 @@ export function portfolioView(store: Store, opts: { project?: string; now?: numb
 
   const today = todayCounts(store, now, projectFilter);
   const olderOpen = olderOpenCount(store, now, projectFilter, archived);
-  return { projects, nextActions, firstRun, archivedProjects: [...archived], today, olderOpen };
+  const undeliveredAnswers = undeliveredAnswersCount(store, now, projectFilter, archived);
+  return { projects, nextActions, firstRun, archivedProjects: [...archived], today, olderOpen, undeliveredAnswers };
 }
 
 // "Heute"-Band der Übersicht (U1): Sessions von heute (Assist-Spawns raus, wie
@@ -305,6 +309,29 @@ function olderOpenCount(
   const rows = db
     .prepare(
       `SELECT project_path FROM items WHERE status IN ${OPEN} AND created_at < ? ${cond}`,
+    )
+    .all(cutoff, ...params) as Array<{ project_path: string | null }>;
+  return rows.filter((r) => !r.project_path || !archived.has(r.project_path)).length;
+}
+
+// Menschlich beantwortete, aber seit >2 h nicht abgeholte Antworten (Zustell-
+// Transparenz): delivered_at IS NULL trennt sauber die noch nicht abgeholten.
+// Archiv-Ausschluss wie bei olderOpenCount (JS-Filter nach der Query).
+function undeliveredAnswersCount(
+  store: Store,
+  now: number,
+  projectFilter: string | null,
+  archived: Set<string>,
+): number {
+  const db = store.rawDb();
+  const cutoff = new Date(now - 2 * 3_600_000).toISOString();
+  const cond = projectFilter ? "AND (project_path = ? OR project_path IS NULL)" : "";
+  const params = projectFilter ? [projectFilter] : [];
+  const rows = db
+    .prepare(
+      `SELECT project_path FROM items
+        WHERE status = 'answered' AND answered_by = 'human'
+          AND delivered_at IS NULL AND answered_at < ? ${cond}`,
     )
     .all(cutoff, ...params) as Array<{ project_path: string | null }>;
   return rows.filter((r) => !r.project_path || !archived.has(r.project_path)).length;

@@ -149,6 +149,20 @@ describe("portfolioView (PRD F10)", () => {
     expect(portfolioView(ts.store, { now: NOW }).projects[0]!.gitMode).toBe("manual");
   });
 
+  it("undeliveredAnswers zählt >2h alte, nicht abgeholte menschliche Antworten", () => {
+    addTurn("u-1", "c:/dev/p", 5 * MIN);
+    // Alt beantwortet, nicht abgeholt (delivered_at null) → zählt.
+    const old = ts.store.addItem({ type: "question", title: "alt offen?", projectPath: "c:/dev/p", source: "claude" });
+    ts.store.answerItem(old.id, "ja", "human");
+    ts.store.rawDb().prepare("UPDATE items SET answered_at = ? WHERE uuid = ?").run(iso(180 * MIN), old.id);
+    // Alt beantwortet, ABER abgeholt (delivered_at gesetzt) → zählt nicht.
+    const done = ts.store.addItem({ type: "question", title: "alt geholt?", projectPath: "c:/dev/p", source: "claude" });
+    ts.store.answerItem(done.id, "ok", "human");
+    ts.store.rawDb().prepare("UPDATE items SET answered_at = ?, delivered_at = ? WHERE uuid = ?").run(iso(180 * MIN), iso(60 * MIN), done.id);
+
+    expect(portfolioView(ts.store, { now: NOW }).undeliveredAnswers).toBe(1);
+  });
+
   it("project filter narrows projects and next actions", () => {
     addTurn("u-1", "c:/dev/p", 5 * MIN);
     addTurn("u-2", "c:/dev/q", 5 * MIN);

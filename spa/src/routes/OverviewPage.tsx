@@ -65,6 +65,11 @@ export default function OverviewPage() {
     // done-mit-Antwort ist eine getroffene Entscheidung, kein Entwurf —
     // dieselbe Semantik wie decisionsView (PO 12.07., i-e2fcaaa932).
     draftCount: inScopeItems.filter((i) => i.answer && i.status !== "answered" && i.status !== "done").length,
+    // Zustell-Transparenz: seit >2 h nicht abgeholte Antworten (Server-Aggregat,
+    // scope-gefiltert). CTA führt in den Entscheidungs-Log — dort sind die
+    // beantworteten Items mit ihrer Zustell-Zustandszeile sichtbar (die Inbox
+    // lädt nur Offenes). Abweichung dokumentiert (Cockpit-Proposal).
+    undeliveredCount: status.data?.undeliveredAnswers ?? 0,
     // Advisory-Stufe des Git-Konzepts: Projekte der Auswahl mit ungesicherter
     // Arbeit zählen (nicht nur das schlimmste ab 10) — außer im Modus 'manual'
     // (nur anzeigen, keine Empfehlungen). Die Empfehlung führt in den Git-Tab.
@@ -73,6 +78,7 @@ export default function OverviewPage() {
       .sort((a, b) => (b.git?.dirtyFiles ?? 0) - (a.git?.dirtyFiles ?? 0)),
     onFiles: () => go("/files"),
     onDrafts: () => toInbox("waiting"),
+    onUndelivered: () => go("/decisions"),
     onGit: () => go("/git"),
   });
 
@@ -164,9 +170,11 @@ type Rec = { key: string; text: string; cta: string; go: () => void };
 function buildRecommendations(t: TFn, a: {
   fullConfigs: Array<{ projectPath: string | null }>;
   draftCount: number;
+  undeliveredCount: number;
   dirtyProjects: ProjectStatus[];
   onFiles: () => void;
   onDrafts: () => void;
+  onUndelivered: () => void;
   onGit: () => void;
 }): Rec[] {
   const recs: Rec[] = [];
@@ -185,6 +193,14 @@ function buildRecommendations(t: TFn, a: {
       text: t(a.draftCount === 1 ? "overview.rec.drafts_one" : "overview.rec.drafts", { n: a.draftCount }),
       cta: t("overview.rec.draftsCta"),
       go: a.onDrafts,
+    });
+  }
+  if (a.undeliveredCount > 0) {
+    recs.push({
+      key: "undelivered",
+      text: t(a.undeliveredCount === 1 ? "overview.rec.undelivered_one" : "overview.rec.undelivered", { n: a.undeliveredCount }),
+      cta: t("overview.rec.undeliveredCta"),
+      go: a.onUndelivered,
     });
   }
   const worst = a.dirtyProjects[0];

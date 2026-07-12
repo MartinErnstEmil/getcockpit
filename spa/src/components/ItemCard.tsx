@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Info } from "lucide-react";
 import { cn, shortName, ageText, timeText } from "@/lib/utils";
+import DeliveryState from "@/components/DeliveryState";
+import { useT } from "@/lib/i18n";
 import { useScope } from "@/lib/useScope";
 import { ASSISTS, RECOMMENDED_ASSIST, type AssistKind, type Item } from "@/api/types";
 import { logAssistEvent } from "@/api/queries";
@@ -85,6 +87,7 @@ export default function ItemCard({
   assistBusy: boolean;
 }) {
   const { setScope } = useScope();
+  const t = useT();
   const [assistOut, setAssistOut] = useState<{ kind: AssistKind; text?: string; error?: string } | null>(null);
   const [assistKind, setAssistKind] = useState<AssistKind | null>(null);
   const [triageState, setTriageState] = useState<"idle" | "loading" | "done" | "error">(
@@ -279,6 +282,14 @@ export default function ItemCard({
           {item.answer && item.status === "answered" && (
             <div className="bg-hl px-3 py-2 text-sm text-on-primary-container">↳ {item.answer}</div>
           )}
+          {/* Zustell-Quittung direkt unter der Antwort: wartet/zugestellt. */}
+          <DeliveryState
+            status={item.status}
+            answeredAt={item.answeredAt}
+            deliveredAt={item.deliveredAt}
+            delivery={item.delivery}
+            answerText={item.answer}
+          />
 
           {/* KI-Modul (PO 11.07.): Einordnung (Auto-Triage) UND die Assist-
               Buttons in EINEM Block. Buttons sitzen in der Kopfzeile neben dem
@@ -382,6 +393,7 @@ export default function ItemCard({
                   <>
                     <p><strong>Speichern</strong> legt deine Antwort als Entwurf ab. Der Entwurf bleibt erhalten (auch nach Reload), zählt aber noch nicht als Entscheidung und wird nicht zugestellt.</p>
                     <p className="mt-1.5"><strong>Zustellen</strong> macht die Antwort verbindlich: Sie ist sofort durchsuchbar, die nächste Claude-Session in diesem Projekt bekommt sie automatisch als Kontext, und sie erscheint dauerhaft im Entscheidungs-Log — damit nachvollziehbar bleibt, was wann entschieden wurde.</p>
+                    <p className="mt-1.5">{t("delivery.ways")}</p>
                   </>
                 )}
               </div>

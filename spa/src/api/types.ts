@@ -81,6 +81,8 @@ export interface StatusResponse {
   // U1: "Heute"-Band und verdeckte Alt-Last der Übersicht.
   today: { sessions: number; decisions: number; newItems: number };
   olderOpen: number;
+  // Zustell-Transparenz: beantwortete Antworten, seit >2 h nicht abgeholt.
+  undeliveredAnswers: number;
 }
 
 export interface Anchor {
@@ -111,8 +113,18 @@ export interface Item {
   answeredBy?: string;
   doneAt?: string;
   deliveredAt?: string;
+  // Zustell-Quittung (Zustell-Transparenz): Weg + Session + Zeitpunkt der ersten
+  // Abholung. Nur an zugestellten Items, null wenn kein Protokoll-Event vorliegt.
+  delivery?: DeliveryInfo | null;
   // Projektspezifische laufende Nummer (#1 = ältestes Item des Projekts).
   projectSeq?: number;
+}
+
+export interface DeliveryInfo {
+  at: string;
+  sessionId: string | null;
+  // "briefing" | "prompt" | "mcp"
+  via: string;
 }
 
 export interface DecisionEntry {
