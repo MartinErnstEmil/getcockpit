@@ -139,15 +139,7 @@ function DecisionDetail({ entry, onOpenInInbox }: { entry: DecisionEntry; onOpen
       {entry.answer && <div className="bg-hl px-3 py-2 text-sm text-on-primary-container">↳ {entry.answer}</div>}
       {/* Zustell-Quittung: für beantwortete Entscheidungen dieselbe Zeile wie
           in der Inbox — hier entsteht das Vertrauen "meine Antwort kam an". */}
-      {item && (
-        <DeliveryState
-          status={item.status}
-          answeredAt={item.answeredAt}
-          deliveredAt={item.deliveredAt}
-          delivery={item.delivery}
-          answerText={item.answer}
-        />
-      )}
+      {item && <DeliveryState item={item} />}
       {entry.anchorFile && (
         <div className="font-mono text-xs">
           <Link to={fileHref(entry.anchorFile, entry.anchorLine ?? undefined, entry.projectPath)} className="text-accent underline decoration-dotted">

@@ -283,13 +283,7 @@ export default function ItemCard({
             <div className="bg-hl px-3 py-2 text-sm text-on-primary-container">↳ {item.answer}</div>
           )}
           {/* Zustell-Quittung direkt unter der Antwort: wartet/zugestellt. */}
-          <DeliveryState
-            status={item.status}
-            answeredAt={item.answeredAt}
-            deliveredAt={item.deliveredAt}
-            delivery={item.delivery}
-            answerText={item.answer}
-          />
+          <DeliveryState item={item} />
 
           {/* KI-Modul (PO 11.07.): Einordnung (Auto-Triage) UND die Assist-
               Buttons in EINEM Block. Buttons sitzen in der Kopfzeile neben dem
