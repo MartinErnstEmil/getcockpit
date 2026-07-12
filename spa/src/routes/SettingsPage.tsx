@@ -22,6 +22,7 @@ import {
   useSetGitMode,
   useDeleteProject,
   useClaudeMdCheck,
+  useDeliverySelftest,
 } from "@/api/queries";
 import { cn, shortName, dayMonth } from "@/lib/utils";
 import { useT, useLocale, LOCALES } from "@/lib/i18n";
@@ -43,6 +44,7 @@ export default function SettingsPage() {
   const [level, setLevelState] = useState<ExpertLevel>(getExpertLevel());
   const status = useStatus({ mode: "active", project: "", days: 7 });
   const enable = useEnableHooks();
+  const selftest = useDeliverySelftest();
 
   return (
     <div className="mx-auto max-w-[720px] px-5 py-5">
@@ -73,6 +75,35 @@ export default function SettingsPage() {
             {enable.isSuccess && t("settings.recording.activeNext")}
           </p>
         )}
+
+        {/* Zustell-Selbsttest: beweist die Kette Hook -> Abholung -> Injektion
+            isoliert (Temp-DB) auf Knopfdruck, mit Klartext-Ergebnis. */}
+        <div className="mt-3 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{t("settings.selftest.title")}</span>
+            <button
+              type="button"
+              disabled={selftest.isPending}
+              onClick={() => selftest.mutate()}
+              className="ds-btn-ghost border border-line !px-3 text-xs"
+            >
+              {selftest.isPending ? t("settings.selftest.running") : t("settings.selftest.run")}
+            </button>
+          </div>
+          <p className="mt-1 max-w-[60ch] text-xs text-ink-2">{t("settings.selftest.desc")}</p>
+          {selftest.isError && (
+            <p className="mt-1 text-xs text-crit">
+              {selftest.error instanceof Error ? selftest.error.message : String(selftest.error)} — {t("common.retry")}.
+            </p>
+          )}
+          {selftest.isSuccess && (
+            <p className={cn("mt-1 text-xs", selftest.data.ok ? "text-ok" : "text-crit")}>
+              {selftest.data.ok
+                ? t("settings.selftest.ok", { ms: selftest.data.ms }) + (selftest.data.reason ? ` — ${selftest.data.reason}` : "")
+                : t("settings.selftest.fail", { reason: selftest.data.reason ?? "?" })}
+            </p>
+          )}
+        </div>
       </section>
 
       <section className="mb-7">

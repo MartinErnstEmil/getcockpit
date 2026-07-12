@@ -15,6 +15,7 @@ import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
+import { runDeliverySelftest } from "./selftest.js";
 import { collectAheadBehind, collectGitState, collectLastSnapshot } from "./gitinfo.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
 import type { ClaudeCmd } from "./standup.js";
@@ -206,6 +207,9 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
   // Concurrency-Guard (Review-Auflage): maximal EIN laufender LLM-Call —
   // der Single-Thread-Server darf nie hinter parallelen Spawns verschwinden.
   let assistBusy = false;
+  // Eigener Guard für den Zustell-Selbsttest: er spawnt das Hook-Bundle (kein
+  // LLM-Lauf), teilt also NICHT assistBusy — beide dürfen nebeneinander laufen.
+  let selftestBusy = false;
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const address = server.address();
@@ -435,6 +439,21 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
         return sendJson(res, 200, result);
       } finally {
         assistBusy = false;
+      }
+    }
+
+    // Zustell-Selbsttest (Zustell-Transparenz): spawnt das Hook-Bundle gegen
+    // eine Temp-DB und beweist Claim + Injektion. Eigener Busy-Guard (kein
+    // LLM-Lauf, teilt nicht assistBusy). Isoliert — nie gegen die echte DB.
+    if (url.pathname === "/api/delivery-selftest") {
+      if (selftestBusy) return sendJson(res, 429, { error: "Selbsttest läuft bereits — kurz warten." });
+      selftestBusy = true;
+      try {
+        const result = runDeliverySelftest();
+        store.recordEvent({ eventType: "delivery_selftest", payload: { ok: result.ok, ms: result.ms } });
+        return sendJson(res, 200, result);
+      } finally {
+        selftestBusy = false;
       }
     }
 

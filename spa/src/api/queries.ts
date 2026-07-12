@@ -14,6 +14,7 @@ import type {
   ProjectAdmin,
   ReportDay,
   SessionMarker,
+  SelftestResult,
   SessionSummary,
   SessionTurn,
   SnippetMeta,
@@ -350,6 +351,14 @@ export function useDeleteProject() {
 export function useClaudeMdCheck() {
   return useMutation({
     mutationFn: () => apiPost<BudgetCheckResult>("/api/claudemd-check", {}),
+  });
+}
+
+// Zustell-Selbsttest (Zustell-Transparenz): beweist die Kette Hook -> Claim ->
+// Injektion auf dieser Maschine, isoliert gegen eine Temp-DB.
+export function useDeliverySelftest() {
+  return useMutation({
+    mutationFn: () => apiPost<SelftestResult>("/api/delivery-selftest", {}),
   });
 }
 

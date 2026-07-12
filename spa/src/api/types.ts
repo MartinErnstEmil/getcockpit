@@ -127,6 +127,14 @@ export interface DeliveryInfo {
   via: string;
 }
 
+// Ergebnis des Zustell-Selbsttests (Zustell-Transparenz): Kette bewiesen oder
+// nicht, mit Dauer und Klartext-Grund im Fehlerfall.
+export interface SelftestResult {
+  ok: boolean;
+  ms: number;
+  reason?: string;
+}
+
 export interface DecisionEntry {
   id: string;
   type: string;

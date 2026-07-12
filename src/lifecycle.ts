@@ -18,6 +18,7 @@ import {
   serializeSettings,
 } from "./settings.js";
 import { Store, type PurgeReport } from "./store.js";
+import { runDeliverySelftest } from "./selftest.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -207,8 +208,23 @@ export function cmdDoctor(opts: { settingsPath?: string; spawnChecks?: boolean }
   if (opts.spawnChecks ?? opts.settingsPath === undefined) {
     checks.push(checkClaudeBinary());
     checks.push(checkMcpRegistered());
+    checks.push(checkDeliveryChain());
   }
   return checks;
+}
+
+// Zustell-Kette end-to-end (Zustell-Transparenz): spawnt das Hook-Bundle gegen
+// eine Temp-DB und prüft Claim + Injektion. Gehört in den spawnChecks-Zweig
+// (kein Web-Hot-Path); läuft ISOLIERT gegen %TEMP% (nie gegen die echte DB).
+function checkDeliveryChain(): DoctorCheck {
+  const r = runDeliverySelftest();
+  return {
+    ok: r.ok,
+    label: r.ok
+      ? `Zustell-Kette end-to-end (${r.ms} ms)${r.reason ? ` — ${r.reason}` : ""}`
+      : `Zustell-Kette gestört: ${r.reason ?? "unbekannt"}`,
+    fix: r.ok ? "" : "cockpit init ausführen und `claude` einmal starten; dann erneut prüfen",
+  };
 }
 
 // disableAllHooks macht registrierte Hooks wirkungslos: keine Aufzeichnung,
