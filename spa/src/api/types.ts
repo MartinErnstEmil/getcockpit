@@ -331,5 +331,32 @@ export interface GitRefreshResult {
   // null = kein Upstream konfiguriert (z. B. lokales Repo ohne Remote).
   aheadBehind: AheadBehind | null;
   // Jüngster Auto-Snapshot (nur bei mode='auto' relevant); null = noch keiner.
-  lastSnapshot: { ref: string; at: string } | null;
+  // unmerged = enthält Arbeit, die nicht in HEAD steckt (merge-base-Prüfung).
+  lastSnapshot: { ref: string; at: string; unmerged: boolean } | null;
+}
+
+// Git-Tab Slice 2: flache Branch-Historie (aufklappbare Karte).
+export interface GitLogEntry {
+  sha: string;
+  at: string;
+  subject: string;
+}
+export interface GitLogResponse {
+  commits: GitLogEntry[];
+  // true, wenn die Seite voll war (== limit) und es vermutlich ältere Commits gibt.
+  hasMore: boolean;
+}
+
+// Git-Tab Slice 2: Commit-Graph über die echten Refs (+ optional Snapshots).
+export interface GitGraphCommit {
+  sha: string;
+  parents: string[];
+  at: string;
+  subject: string;
+  refs: string[];
+}
+export interface GitGraphResponse {
+  commits: GitGraphCommit[];
+  // limit erreicht -> es gibt vermutlich ältere Commits außerhalb des Fensters.
+  limitHit: boolean;
 }

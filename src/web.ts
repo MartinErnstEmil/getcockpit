@@ -10,14 +10,18 @@ import { createServer } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cockpitHome } from "./paths.js";
-import { ASSIST_KINDS, ASSIST_LANGS, ASSIST_PERSONAS, runAssist, type AssistKind, type AssistLang, type AssistPersona } from "./assist.js";
+import { ASSIST_KINDS, parseAssistPrefs, runAssist, runGitAssist, type AssistKind } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
 import { runDeliverySelftest } from "./selftest.js";
-import { collectAheadBehind, collectGitState, collectLastSnapshot } from "./gitinfo.js";
+import { collectAheadBehind, collectGitGraph, collectGitLog, collectGitState, collectLastSnapshot } from "./gitinfo.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
+import { applyLegacyRemoval, runSetup } from "./setup.js";
+import { setupPageHtml } from "./setuppage.js";
+import { defaultSettingsPath } from "./settings.js";
+import { checkForUpdate } from "./update.js";
 import type { ClaudeCmd } from "./standup.js";
 import type { Store } from "./store.js";
 import { decisionsView, portfolioView, reportView } from "./views.js";
@@ -211,6 +215,19 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
   // LLM-Lauf), teilt also NICHT assistBusy — beide dürfen nebeneinander laufen.
   let selftestBusy = false;
 
+  // Nur bekannte Projekte (turns ∪ items) an git weiterreichen — nie einen
+  // beliebigen HTTP-Parameter als cwd shellen. Geteilt von git-refresh, git-log,
+  // git-graph und git-assist.
+  function isKnownProject(project: string): boolean {
+    return !!store
+      .rawDb()
+      .prepare(
+        `SELECT 1 FROM turns WHERE project_path = ?
+         UNION SELECT 1 FROM items WHERE project_path = ? LIMIT 1`,
+      )
+      .get(project, project);
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : WEB_DEFAULT_PORT;
@@ -226,6 +243,14 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // /spa/** ist tokenfrei; ALLE /api/** bleiben token- und origin-geschützt.
     if (req.method === "GET" && (url.pathname === "/spa" || url.pathname.startsWith("/spa/"))) {
       return serveStatic(res, url.pathname, webRoot);
+    }
+    // Einrichtungs-Panel: tokenfrei ausgeliefert wie die SPA-Shell (die Seite
+    // trägt keine Daten). Das Token steht in der URL und wird vom Skript für die
+    // /api-Aufrufe genutzt; main.cjs lädt /setup nur bei Aufmerksamkeitsbedarf.
+    if (req.method === "GET" && url.pathname === "/setup") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" });
+      res.end(setupPageHtml(url.searchParams.get("token") ?? ""));
+      return;
     }
     // Root-Redirect (Auflagen T1/T6): / -> 302 /spa/ MIT Query-Forwarding
     // (+ url.search), sonst stirbt der Lesezeichen-Einstieg /?token=. Tokenfrei
@@ -282,6 +307,16 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       if (!id) return sendJson(res, 400, { error: "id fehlt" });
       return sendJson(res, 200, { comments: store.listDecisionComments(id) });
     }
+    // Einrichtungs-Report für das Panel: rein anzeigend (spawnChecks:false,
+    // fileBlocker:false) — die heilenden Aktionen liefen bereits beim App-Start
+    // in main.cjs; das Panel spiegelt nur den Ist-Stand und die Legacy-Liste.
+    if (req.method === "GET" && url.pathname === "/api/setup") {
+      return sendJson(res, 200, runSetup({ spawnChecks: false, fileBlocker: false, webRoot }));
+    }
+    // Update-Verfügbarkeit (nicht-blockierend, fail-open). Auch von der SPA nutzbar.
+    if (req.method === "GET" && url.pathname === "/api/update") {
+      return sendJson(res, 200, await checkForUpdate());
+    }
     if (req.method === "GET" && url.pathname === "/api/status") {
       const view = portfolioView(store, {
         project: url.searchParams.get("project") ?? undefined,
@@ -301,6 +336,34 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // füllt ihn opportunistisch; gezielt frisch macht POST /api/git-refresh.
     if (req.method === "GET" && url.pathname === "/api/git") {
       return sendJson(res, 200, { states: store.listGitStates() });
+    }
+    // Git-Tab Slice 2: volle Branch-Historie EINES Projekts live (aufklappbare
+    // Karte). Eigenes Budget in collectGitLog (nicht die 300-ms-Hook-Grenze).
+    if (req.method === "GET" && url.pathname === "/api/git-log") {
+      const project = url.searchParams.get("project") ?? "";
+      if (!project) return sendJson(res, 400, { error: "project fehlt" });
+      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const limitRaw = Number(url.searchParams.get("limit"));
+      const log = collectGitLog(project, {
+        limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 30,
+      });
+      if (!log) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
+      return sendJson(res, 200, log);
+    }
+    // Git-Tab Slice 2: Commit-Graph über die echten Refs, optional inkl. der
+    // Auto-Snapshots (?snapshots=1). Nicht paginierbar — die Lane-Zuweisung
+    // hängt am ganzen Fenster; "mehr laden" ruft mit größerem limit neu auf.
+    if (req.method === "GET" && url.pathname === "/api/git-graph") {
+      const project = url.searchParams.get("project") ?? "";
+      if (!project) return sendJson(res, 400, { error: "project fehlt" });
+      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const limitRaw = Number(url.searchParams.get("limit"));
+      const graph = collectGitGraph(project, {
+        limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 200,
+        snapshots: url.searchParams.get("snapshots") === "1",
+      });
+      if (!graph) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
+      return sendJson(res, 200, graph);
     }
     // Verlauf (Phase 5): Session-Liste + Raw-Turns einer Session.
     if (req.method === "GET" && url.pathname === "/api/sessions") {
@@ -555,14 +618,7 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     if (url.pathname === "/api/git-refresh") {
       const project = (body as { project?: string }).project ?? "";
       if (!project) return sendJson(res, 400, { error: "project fehlt" });
-      const known = store
-        .rawDb()
-        .prepare(
-          `SELECT 1 FROM turns WHERE project_path = ?
-           UNION SELECT 1 FROM items WHERE project_path = ? LIMIT 1`,
-        )
-        .get(project, project);
-      if (!known) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
       const state = collectGitState(project);
       if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
       store.upsertGitState(state);
@@ -572,6 +628,57 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
         aheadBehind: collectAheadBehind(project),
         lastSnapshot: collectLastSnapshot(project),
       });
+    }
+
+    // Git-Tab Slice 3: Haiku-"Was jetzt?" — erklärt den Git-Zustand und schlägt
+    // Wege vor. Der Zustand wird SERVERSEITIG live erhoben (nie Rohtext vom
+    // Client) und als DATEN an den Assist gefenced. Teilt den Single-Flight-
+    // Guard der übrigen LLM-Läufe. FLÜCHTIG: nichts wird persistiert.
+    if (url.pathname === "/api/git-assist") {
+      const project = (body as { project?: string }).project ?? "";
+      if (!project) return sendJson(res, 400, { error: "project fehlt" });
+      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const state = collectGitState(project);
+      if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
+      const ab = collectAheadBehind(project);
+      const snap = collectLastSnapshot(project);
+      const summary = [
+        `Branch: ${state.branch ?? "?"}`,
+        `Nicht festgehaltene Änderungen (dirty): ${state.dirtyFiles}`,
+        ab === null
+          ? "Upstream: keiner konfiguriert (kann nicht hochgeladen werden)"
+          : `Nur lokal (ahead): ${ab.ahead}; hinter dem Remote (behind): ${ab.behind}`,
+        snap ? `Letzte Auto-Sicherung: ${snap.ref}${snap.unmerged ? " (enthält Arbeit, die nicht in HEAD steckt)" : " (bereits in HEAD)"}` : "Auto-Sicherungen: keine",
+      ].join("\n");
+      const prefs = parseAssistPrefs(body as { persona?: string; lang?: string });
+      if (assistBusy) return sendJson(res, 429, { error: "Ein KI-Lauf ist bereits aktiv — kurz warten." });
+      assistBusy = true;
+      try {
+        const result = await runGitAssist({
+          summary,
+          ...prefs,
+          claudeCmd: webOpts.assistCmd,
+          timeoutMs: webOpts.assistTimeoutMs,
+        });
+        store.recordEvent({ eventType: "git_assist", projectPath: project, payload: { ok: result.ok } });
+        if (!result.ok) return sendJson(res, 502, { error: result.error });
+        return sendJson(res, 200, { text: result.text });
+      } finally {
+        assistBusy = false;
+      }
+    }
+
+    // Setup-Panel: ausgewählte Legacy-Hooks entfernen (Backup wird einmal
+    // angelegt). Trägt keys statt id (daher vor dem id-Zwang). Die POST-Härtung
+    // (Origin, JSON, Token) lief bereits; die Marker-/Auswahl-Sicherheit sitzt in
+    // removeLegacyHooks (nur bekannte Legacy-Marker, nie cockpit/fremde Hooks).
+    if (url.pathname === "/api/setup-remove-hooks") {
+      const keys = Array.isArray((body as { keys?: unknown }).keys)
+        ? ((body as { keys: unknown[] }).keys.filter((k) => typeof k === "string") as string[])
+        : [];
+      const { removed } = applyLegacyRemoval(defaultSettingsPath(), keys);
+      store.recordEvent({ eventType: "setup_remove_hooks", payload: { removed } });
+      return sendJson(res, 200, { removed });
     }
 
     // Banner-Klickpfad: disableAllHooks aus der settings.json entfernen —
@@ -590,25 +697,16 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       if (!(ASSIST_KINDS as readonly string[]).includes(kind)) {
         return sendJson(res, 400, { error: "kind nicht erlaubt" });
       }
-      // Persona aus den Nutzer-Einstellungen (Expertenlevel); unbekannte Werte
-      // fallen still auf den Default zurück statt den Call platzen zu lassen.
-      const personaRaw = (body as { persona?: string }).persona ?? "";
-      const persona = (ASSIST_PERSONAS as readonly string[]).includes(personaRaw)
-        ? (personaRaw as AssistPersona)
-        : undefined;
-      // Ausgabesprache aus der Oberfläche (U3); unbekannte Werte -> Default.
-      const langRaw = (body as { lang?: string }).lang ?? "";
-      const lang = (ASSIST_LANGS as readonly string[]).includes(langRaw)
-        ? (langRaw as AssistLang)
-        : undefined;
+      // Persona (Expertenlevel) + Sprache (U3) aus den Einstellungen; unbekannte
+      // Werte fallen still auf den Default zurück statt den Call platzen zu lassen.
+      const prefs = parseAssistPrefs(body as { persona?: string; lang?: string });
       if (assistBusy) return sendJson(res, 429, { error: "Ein Assist läuft bereits — kurz warten." });
       assistBusy = true;
       try {
         const result = await runAssist(store, {
           itemId: body.id,
           kind: kind as AssistKind,
-          persona,
-          lang,
+          ...prefs,
           claudeCmd: webOpts.assistCmd,
           timeoutMs: webOpts.assistTimeoutMs,
         });

@@ -492,4 +492,70 @@ describe("Deep-Link- und Viewer-Endpunkte (Inbox-Rework 09.07.)", () => {
     });
     expect(unknown.status).toBe(400);
   });
+
+  it("Git-Tab Slice 2: /api/git-log liefert die Historie, /api/git-graph den Graphen", async () => {
+    // Eigenes Mini-Repo mit zwei Commits (erfasstes Projekt).
+    const repo = join(ts.dir, "git-log-repo");
+    mkdirSync(repo, { recursive: true });
+    const run = (args: string[]): string => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    run(["init", "-q"]);
+    run(["config", "user.email", "t@example.com"]);
+    run(["config", "user.name", "t"]);
+    writeFileSync(join(repo, "a.txt"), "eins", "utf8");
+    run(["add", "."]);
+    run(["commit", "-q", "-m", "erster"]);
+    writeFileSync(join(repo, "a.txt"), "zwei", "utf8");
+    run(["add", "."]);
+    run(["commit", "-q", "-m", "zweiter"]);
+    ts.store.insertTurn({
+      uuid: "t-gitlog", sessionId: "s-gitlog", projectPath: repo,
+      role: "user", content: "git log", timestamp: new Date().toISOString(),
+    });
+    const p = repo.replace(/\\/g, "/").replace(/^([A-Z]):/, (m) => m.toLowerCase());
+
+    const log = await fetch(url(`/api/git-log?project=${encodeURIComponent(p)}`));
+    expect(log.status).toBe(200);
+    const logBody = (await log.json()) as { commits: Array<{ subject: string }>; hasMore: boolean };
+    expect(logBody.commits.map((c) => c.subject)).toEqual(["zweiter", "erster"]);
+    expect(logBody.hasMore).toBe(false); // nur zwei Commits, keine volle Seite
+
+    const graph = await fetch(url(`/api/git-graph?project=${encodeURIComponent(p)}`));
+    expect(graph.status).toBe(200);
+    const graphBody = (await graph.json()) as { commits: Array<{ sha: string; parents: string[] }>; limitHit: boolean };
+    expect(graphBody.commits).toHaveLength(2);
+    // Der zweite Commit hat genau einen (den ersten) als Elter.
+    const second = graphBody.commits.find((c) => c.parents.length === 1);
+    expect(second).toBeTruthy();
+
+    // Unbekanntes Projekt wird nie geshellt.
+    expect((await fetch(url("/api/git-log?project=c:/nix"))).status).toBe(400);
+    expect((await fetch(url("/api/git-graph?project=c:/nix"))).status).toBe(400);
+  });
+});
+
+// Setup-Panel + Endpunkte: hier NUR die nebenwirkungsfreie Verdrahtung (Panel-
+// HTML tokenfrei, Token-Wächter). Das Verhalten von runSetup läuft isoliert im
+// Subprozess (setup.test.ts) — es zielt auf ~/.claude und ~/.cockpit und darf
+// nie aus einem In-Process-Test heraus laufen (Selbstschutz).
+describe("Setup-Panel + Endpunkte (Verdrahtung)", () => {
+  it("/setup liefert das Panel tokenfrei und spritzt das Token ins Skript", async () => {
+    const res = await fetch(url("/setup", false));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("Einrichtung");
+    // Das Token aus der URL landet im Skript (für die /api-Aufrufe des Panels).
+    const withToken = await (await fetch(url("/setup"))).text();
+    expect(withToken).toContain(`const TOKEN = "${token}"`);
+  });
+
+  it("Token-Wächter schützt /api/setup und /api/setup-remove-hooks", async () => {
+    expect((await fetch(url("/api/setup", false))).status).toBe(403);
+    const post = await fetch(url("/api/setup-remove-hooks", false), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ keys: [] }),
+    });
+    expect(post.status).toBe(403);
+  });
 });

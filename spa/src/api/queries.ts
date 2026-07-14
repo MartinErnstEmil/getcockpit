@@ -8,6 +8,8 @@ import type {
   DecisionComment,
   DecisionEntry,
   FileView,
+  GitGraphResponse,
+  GitLogResponse,
   GitRefreshResult,
   GitStateRow,
   Item,
@@ -394,5 +396,38 @@ export function useGitRefresh() {
   return useMutation({
     mutationFn: (v: { project: string }) => apiPost<GitRefreshResult>("/api/git-refresh", v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["git-states"] }),
+  });
+}
+
+// Slice 2: volle Branch-Historie EINES Projekts, erst bei aufgeklappter Karte
+// geladen (enabled). Live, eigenes Server-Budget.
+export function useGitLog(project: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["git-log", project],
+    enabled: enabled && project !== null && project !== "",
+    queryFn: () =>
+      apiFetch<GitLogResponse>(`/api/git-log?project=${encodeURIComponent(project ?? "")}&limit=100`),
+  });
+}
+
+// Slice 2: Commit-Graph EINES Projekts (Graph-Subtab). snapshots blendet die
+// refs/cockpit-Auto-Sicherungen ein; limit steuert das (nicht paginierte) Fenster.
+export function useGitGraph(project: string | null, opts: { snapshots: boolean; limit: number }) {
+  return useQuery({
+    queryKey: ["git-graph", project, opts.snapshots, opts.limit],
+    enabled: project !== null && project !== "",
+    queryFn: () =>
+      apiFetch<GitGraphResponse>(
+        `/api/git-graph?project=${encodeURIComponent(project ?? "")}&limit=${opts.limit}${opts.snapshots ? "&snapshots=1" : ""}`,
+      ),
+  });
+}
+
+// Slice 3: Haiku-"Was jetzt?" zum Git-Zustand (flüchtig, nicht persistiert).
+// persona/lang wie bei useAssist aus den Einstellungen.
+export function useGitAssist() {
+  return useMutation({
+    mutationFn: (v: { project: string }) =>
+      apiPost<{ text: string }>("/api/git-assist", { ...v, persona: getExpertLevel(), lang: getLocale() }),
   });
 }

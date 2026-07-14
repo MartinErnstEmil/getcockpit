@@ -18,6 +18,8 @@ import {
 } from "../spa/src/lib/scope";
 import { extractToken, stripTokenParam } from "../spa/src/lib/token";
 import { gitAdvisoryVisible, sessionPromptGitRule } from "../spa/src/lib/gitmode";
+import { deriveGitActions } from "../spa/src/lib/gitactions";
+import { computeGraph, type GraphCommit } from "../spa/src/lib/gitgraph";
 import {
   parseOptionLine,
   isSelected,
@@ -58,6 +60,107 @@ describe("Git-Modi (reine Ableitung)", () => {
     expect(auto).toContain("Git-Disziplin");
     expect(auto).toContain("refs/cockpit/");
     expect(auto).toContain("ersetzen keine Commits");
+  });
+});
+
+describe("Git-Handlungsempfehlungen (deriveGitActions, reine Ableitung)", () => {
+  it("undefined ahead/behind unterdrückt alle upstream-abhängigen Hinweise", () => {
+    // Vor dem Live-Refresh kennen wir ahead/behind/upstream nicht — nur dirty
+    // stammt aus dem Cache und darf erscheinen.
+    const a = deriveGitActions({ branch: "main", dirtyFiles: 3, aheadBehind: undefined });
+    expect(a.map((x) => x.kind)).toEqual(["dirty"]);
+  });
+
+  it("dirty=0 ohne ahead/behind ergibt keine Empfehlung", () => {
+    expect(deriveGitActions({ branch: "main", dirtyFiles: 0, aheadBehind: undefined })).toEqual([]);
+  });
+
+  it("behind steht vor dirty vor unpushed (Dringlichkeit) und behind hat kein Kommando", () => {
+    const a = deriveGitActions({ branch: "main", dirtyFiles: 2, aheadBehind: { ahead: 1, behind: 4 } });
+    expect(a.map((x) => x.kind)).toEqual(["behind", "dirty", "unpushed"]);
+    const behind = a.find((x) => x.kind === "behind")!;
+    expect(behind.command).toBeNull(); // kein Ein-Klick-Fix (Konfliktgefahr)
+    expect(behind.sessionPrompt).toContain("zusammen");
+    expect(a.find((x) => x.kind === "unpushed")!.command).toBe("git push");
+  });
+
+  it("kein Upstream (ab === null) zeigt no-upstream mit Branch im Kommando", () => {
+    const a = deriveGitActions({ branch: "feature/x", dirtyFiles: 0, aheadBehind: null });
+    expect(a.map((x) => x.kind)).toEqual(["no-upstream"]);
+    expect(a[0]!.command).toBe("git push -u origin feature/x");
+  });
+
+  it("kein Upstream ohne Branch bzw. detached HEAD nutzt HEAD als Ref", () => {
+    expect(deriveGitActions({ branch: null, dirtyFiles: 0, aheadBehind: null })).toEqual([]);
+    const a = deriveGitActions({ branch: "HEAD", dirtyFiles: 0, aheadBehind: null });
+    expect(a[0]!.command).toBe("git push -u origin HEAD");
+  });
+
+  it("snapshotUnmerged erzeugt einen Info-Hinweis ohne Kommando", () => {
+    const a = deriveGitActions({ branch: "main", dirtyFiles: 0, aheadBehind: { ahead: 0, behind: 0 }, snapshotUnmerged: true });
+    expect(a.map((x) => x.kind)).toEqual(["snapshot-unmerged"]);
+    expect(a[0]!.command).toBeNull();
+    expect(a[0]!.severity).toBe("info");
+  });
+
+  it("kein Text verwendet das verbotene Wort 'ungesichert' (Terminologie-Leitplanke)", () => {
+    const all = deriveGitActions({ branch: "main", dirtyFiles: 1, aheadBehind: { ahead: 1, behind: 1 }, snapshotUnmerged: true });
+    for (const x of all) {
+      expect(`${x.title} ${x.detail}`.toLowerCase()).not.toContain("ungesichert");
+    }
+  });
+});
+
+describe("Commit-Graph Lane-Zuweisung (computeGraph, reine Funktion)", () => {
+  const g = (sha: string, ...parents: string[]): GraphCommit => ({ sha, parents });
+
+  it("lineare Historie bleibt in Spalte 0", () => {
+    const graph = computeGraph([g("c", "b"), g("b", "a"), g("a")]);
+    expect(graph.width).toBe(1);
+    expect(graph.nodes.map((n) => n.lane)).toEqual([0, 0, 0]);
+    // a hat keinen Elter -> keine Kante von a.
+    expect(graph.edges.filter((e) => e.fromSha === "a")).toEqual([]);
+  });
+
+  it("branch + merge: zwei Stränge, Merge hat zwei Eltern-Kanten", () => {
+    // m(merge) -> a,b ; a -> base ; b -> base ; base
+    const graph = computeGraph([g("m", "a", "b"), g("a", "base"), g("b", "base"), g("base")]);
+    expect(graph.width).toBeGreaterThanOrEqual(2);
+    const mEdges = graph.edges.filter((e) => e.fromSha === "m");
+    expect(mEdges.map((e) => e.toSha).sort()).toEqual(["a", "b"]);
+    // base wird von a und b erwartet -> beide Kanten landen in derselben Spalte.
+    const baseLane = graph.nodes.find((n) => n.sha === "base")!.lane;
+    expect(baseLane).toBeGreaterThanOrEqual(0);
+  });
+
+  it("octopus-Merge (3 Eltern) erzeugt drei Kanten", () => {
+    const graph = computeGraph([g("m", "a", "b", "c"), g("a"), g("b"), g("c")]);
+    expect(graph.edges.filter((e) => e.fromSha === "m")).toHaveLength(3);
+    expect(graph.width).toBeGreaterThanOrEqual(3);
+  });
+
+  it("mehrere Wurzeln (unverbundene Historien) brechen nicht", () => {
+    const graph = computeGraph([g("x", "x0"), g("x0"), g("y", "y0"), g("y0")]);
+    // Keine Kante zeigt ins Leere außer bewusst als Stummel; alle Eltern hier im Fenster.
+    expect(graph.edges.every((e) => e.toSha !== null)).toBe(true);
+    expect(graph.nodes).toHaveLength(4);
+  });
+
+  it("Elter außerhalb des Fensters wird zum Stummel (toSha null, Spalte = Kind)", () => {
+    // b fehlt (Cap) -> Kante a->b ist ein Stummel in a's Spalte.
+    const graph = computeGraph([g("a", "b")]);
+    const e = graph.edges.find((x) => x.fromSha === "a")!;
+    expect(e.toSha).toBeNull();
+    expect(e.toLane).toBe(graph.nodes[0]!.lane);
+  });
+
+  it("Snapshot, der an einen inneren Commit hängt, verbindet dorthin", () => {
+    // Kette c->b->a; Snapshot s hängt an b (innerer Commit, kein Tip).
+    const graph = computeGraph([g("s", "b"), g("c", "b"), g("b", "a"), g("a")]);
+    const sEdge = graph.edges.find((e) => e.fromSha === "s")!;
+    expect(sEdge.toSha).toBe("b");
+    const bLane = graph.nodes.find((n) => n.sha === "b")!.lane;
+    expect(sEdge.toLane).toBe(bLane);
   });
 });
 
