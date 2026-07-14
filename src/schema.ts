@@ -28,19 +28,79 @@ export const SQL_INSERT_EVENT = `INSERT INTO events
 export const SQL_HAS_EVENT =
   "SELECT 1 FROM events WHERE event_type = ? AND session_id = ? LIMIT 1";
 
-// Atomares Beanspruchen unzugestellter menschlicher Antworten (Paket 1):
-// EIN Statement liest UND quittiert. SQLite (WAL) serialisiert Schreiber, also
-// beansprucht genau eine Session jede Zeile — kein Doppel zwischen Briefing,
-// On-the-fly-Injektion (Hook) und pickup_answers (MCP). Geteilt zwischen
-// better-sqlite3 (Store, .all()) und node:sqlite (Hook) — beide unterstützen
-// RETURNING. Parameter: [nowIso, normalizedProject].
-export const SQL_CLAIM_ANSWERS = `UPDATE items SET delivered_at = ?
+// v2-Zustellung (offered/acked, Migration v6). delivered_at bedeutet ab hier
+// "finalisiert (geackt)", gesetzt NUR durch den ACK. PUSH (Hooks) und PULL
+// (pickup_answers) wählen nur aus und vermerken ein Angebot — sie finalisieren
+// NICHT. So geht eine nicht-bearbeitete Antwort nie still verloren; der einzige
+// Finalisierer ist ACK (exactly-once über delivered_at IS NULL). Poison-Cap:
+// nach OFFER_POISON_CAP Angeboten ohne Ack -> dead=1 (laut + umkehrbar in der UI).
+export const OFFER_POISON_CAP = 5;
+
+// Anbietbare menschliche Antworten eines Projekts: beantwortet, noch nicht geackt,
+// nicht totgesagt. '' -> nur globale (project_path IS NULL). REINE Auswahl (kein Write).
+export const SQL_SELECT_OFFERABLE = `SELECT uuid, type, status, title, answer FROM items
   WHERE (project_path = ? OR project_path IS NULL)
+    AND status = 'answered' AND answered_by = 'human'
+    AND delivered_at IS NULL AND dead = 0`;
+
+// Angebot je (item, session) atomar vermerken (Dedup, TOCTOU-frei): INSERT OR
+// IGNORE; der Aufrufer injiziert NUR, wenn changes()=1 (frisch angeboten). Geteilt
+// zwischen better-sqlite3 (Store) und node:sqlite (Hook).
+export const SQL_RECORD_OFFER =
+  "INSERT OR IGNORE INTO answer_offers (item_uuid, session_id, offered_at) VALUES (?, ?, ?)";
+
+// Wie oft wurde EIN Item insgesamt angeboten (distinct Sessions) — Poison-Signal.
+export const SQL_COUNT_OFFERS = "SELECT COUNT(*) AS n FROM answer_offers WHERE item_uuid = ?";
+
+// items.offered_at erstmalig setzen (für "unbestätigt seit"): nur wenn noch NULL.
+export const SQL_SET_OFFERED_AT =
+  "UPDATE items SET offered_at = ? WHERE uuid = ? AND offered_at IS NULL";
+
+// Totsagen bei erreichtem Poison-Cap: stoppt weitere Angebote (Auswahl filtert dead=0).
+export const SQL_SET_DEAD = "UPDATE items SET dead = 1 WHERE uuid = ?";
+
+// "Erneut senden" (Mensch): zurück in die Outbox — löscht NIE die Antwort.
+export const SQL_RESEND =
+  "UPDATE items SET delivered_at = NULL, offered_at = NULL, dead = 0 WHERE uuid = ?";
+export const SQL_CLEAR_OFFERS = "DELETE FROM answer_offers WHERE item_uuid = ?";
+
+// ACK = einziger Finalisierer, exactly-once (delivered_at IS NULL guard), projekt-
+// gescopet, VOLLE UUIDs (keine Präfix-Auflösung). Dynamische Platzhalter je Anzahl.
+// Parameter: [nowIso, ...uuids, normalizedProject]. Geteilt beide Treiber (RETURNING).
+export function buildAckAnswersSql(count: number): string {
+  const ph = Array.from({ length: count }, () => "?").join(", ");
+  return `UPDATE items SET delivered_at = ? WHERE uuid IN (${ph})
+    AND (project_path = ? OR project_path IS NULL)
     AND status = 'answered' AND answered_by = 'human' AND delivered_at IS NULL
   RETURNING uuid, type, status, title, answer`;
+}
 
-// Rückgabeform von SQL_CLAIM_ANSWERS — treiberfrei, damit Store und Hook-Bundle
-// (node:sqlite) denselben Typ teilen, ohne dass der Hook store.ts zieht.
+// Zustell-Protokoll-Events (v2): Schreiber (Hook/MCP) und Leser (deliveryInfo,
+// Heute-Zähler) müssen sich auf DENSELBEN String einigen — sonst bricht die
+// Quittung still. Daher hier ein zentraler Vertrag statt verstreuter Literale.
+export const DELIVERY_EVENT = { OFFERED: "answer_offered", ACKED: "answer_acked" } as const;
+
+// Angebots-Buchführung EINMAL (Altitude): die Orchestrierung (Dedup-Early-Return,
+// offered_at nur beim ersten Mal, Poison-Cap) lebt hier statt dupliziert je
+// Treiber — wie turnInsertParams/eventInsertParams. Jeder Treiber reicht nur
+// dünne run/get-Adapter herein (better-sqlite3 / node:sqlite). true = frisch
+// angeboten (injizieren), false = schon angeboten (Dedup).
+export function recordOfferOn(
+  run: (sql: string, ...params: Array<string | number | null>) => { changes: number | bigint },
+  getCount: (sql: string, ...params: Array<string | number | null>) => { n: number } | undefined,
+  itemUuid: string,
+  sessionId: string,
+  now: string,
+): boolean {
+  if (Number(run(SQL_RECORD_OFFER, itemUuid, sessionId, now).changes) === 0) return false;
+  run(SQL_SET_OFFERED_AT, now, itemUuid);
+  const cnt = getCount(SQL_COUNT_OFFERS, itemUuid);
+  if ((cnt?.n ?? 0) >= OFFER_POISON_CAP) run(SQL_SET_DEAD, itemUuid);
+  return true;
+}
+
+// Rückgabeform von SQL_SELECT_OFFERABLE und dem ACK-RETURNING — treiberfrei, damit
+// Store und Hook-Bundle (node:sqlite) denselben Typ teilen, ohne dass der Hook store.ts zieht.
 export interface ClaimedAnswer {
   uuid: string;
   type: string;
@@ -270,6 +330,22 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     at TEXT NOT NULL
   );
   CREATE INDEX env_history_key ON env_history(project_path, key_name);
+  `,
+  // v6 (Zustellung v2): zuverlässige Antwort-Zustellung mit Quittung. delivered_at
+  // bedeutet ab hier "finalisiert (geackt)". offered_at = erstmals angeboten (für
+  // "unbestätigt seit"), dead = Poison-Cap erreicht (laut + umkehrbar). answer_offers
+  // trägt je (item, session) EIN Angebot (indizierter Dedup, kein JSON-Scan im
+  // Hot-Path, TOCTOU-frei via INSERT OR IGNORE). Bestandszeilen: offered_at/dead
+  // defaulten sauber, delivered_at behält seine alte Bedeutung (bereits zugestellt).
+  `
+  ALTER TABLE items ADD COLUMN offered_at TEXT;
+  ALTER TABLE items ADD COLUMN dead INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE answer_offers (
+    item_uuid TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    offered_at TEXT NOT NULL,
+    PRIMARY KEY (item_uuid, session_id)
+  );
   `,
 ];
 

@@ -60,10 +60,11 @@ afterAll(async () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("MCP server (7 tools, F6)", () => {
-  it("lists exactly the seven tools (ADR-011 + Paket 2 pickup_answers)", async () => {
+describe("MCP server (8 tools, F6)", () => {
+  it("lists exactly the eight tools (ADR-011 + pickup/ack v2)", async () => {
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([
+      "ack_answers",
       "add_item",
       "answer_question",
       "list_items",
@@ -177,7 +178,7 @@ describe("MCP server (7 tools, F6)", () => {
     expect(empty.count).toBe(0);
   });
 
-  it("pickup_answers claimt menschliche Antworten atomar und quittiert (Paket 2)", async () => {
+  it("pickup_answers ist NICHT-finalisierend; erst ack_answers finalisiert (v2)", async () => {
     // Menschlich beantwortetes Item direkt seeden — MCP-Tools schreiben nur 'claude'.
     const seed = Store.open(dbPath);
     const item = seed.addItem({ type: "question", title: "Pickup-Testfrage?", projectPath: "c:/dev/pickup" });
@@ -185,19 +186,34 @@ describe("MCP server (7 tools, F6)", () => {
     seed.close();
 
     const first = payload<{ count: number; answers: Array<{ uuid: string; answer: string }> }>(
-      await call("pickup_answers", { projectPath: "c:/dev/pickup" }),
+      await call("pickup_answers", { itemIds: [item.id], projectPath: "c:/dev/pickup" }),
     );
     expect(first.count).toBe(1);
     expect(first.answers[0]?.answer).toBe("menschliche Antwort");
-    // Zweiter Aufruf: quittiert (delivered_at) → leer.
+    // Zweiter Pull ohne Ack: NICHT-finalisierend -> Antwort taucht wieder auf.
     const second = payload<{ count: number }>(
-      await call("pickup_answers", { projectPath: "c:/dev/pickup" }),
+      await call("pickup_answers", { itemIds: [item.id], projectPath: "c:/dev/pickup" }),
     );
-    expect(second.count).toBe(0);
-    // Gemeinsames delivered_at: das Briefing würde sie nicht erneut zustellen.
+    expect(second.count).toBe(1);
+
+    const mid = Store.open(dbPath);
+    expect(mid.getItem(item.id)?.deliveredAt).toBeFalsy(); // noch nicht finalisiert
+    expect(mid.getItem(item.id)?.offeredAt).toBeTruthy(); // aber angeboten
+    mid.close();
+
+    // Ack finalisiert (exactly-once): danach ist die Antwort aus der Outbox.
+    const acked = payload<{ count: number; acked: string[] }>(
+      await call("ack_answers", { itemIds: [item.id], projectPath: "c:/dev/pickup" }),
+    );
+    expect(acked.count).toBe(1);
+    const third = payload<{ count: number }>(
+      await call("pickup_answers", { itemIds: [item.id], projectPath: "c:/dev/pickup" }),
+    );
+    expect(third.count).toBe(0);
+
     const check = Store.open(dbPath);
     expect(check.getItem(item.id)?.deliveredAt).toBeTruthy();
-    // Zustell-Protokoll: genau EIN answer_delivered-Event, via=mcp, ohne Session.
+    // Quittung (answer_acked): via=mcp, ohne Session.
     const info = check.deliveryInfo([item.id]).get(item.id);
     check.close();
     expect(info?.via).toBe("mcp");
@@ -209,7 +225,7 @@ describe("MCP server (7 tools, F6)", () => {
     expect(res.isError).toBe(true);
     // Server lebt noch:
     const tools = await client.listTools();
-    expect(tools.tools).toHaveLength(7);
+    expect(tools.tools).toHaveLength(8);
   });
 
   it("records mcp_tool_call events (stats backbone)", async () => {

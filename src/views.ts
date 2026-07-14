@@ -3,6 +3,7 @@
 // Es gibt keinen "Projektstatus", der gesetzt oder stale werden kann — jede
 // Zahl hier ist eine Query und verschwindet mit ihrer Ursache (ARD §1.3).
 import { normalizeProjectPath } from "./paths.js";
+import { DELIVERY_EVENT } from "./schema.js";
 import type { Store } from "./store.js";
 import { isInternalSession } from "./transcript.js";
 
@@ -267,15 +268,15 @@ function todayCounts(
       .prepare(`SELECT COUNT(*) AS n FROM items WHERE created_at >= ? ${pCond}`)
       .get(startIso, ...pParams) as { n: number }
   ).n;
-  // Heute abgeholte Antworten (Zustell-Transparenz): DISTINCT itemId, damit die
-  // dokumentierte Parallel-Kante (zwei Events je Item) nicht doppelt zählt.
+  // Heute bestätigte Antworten (Zustellung v2): DISTINCT itemId über answer_acked
+  // (finalisiert vom Agenten), damit mehrere Ack-Events je Item nicht doppelt zählen.
   const delivered = (
     db
       .prepare(
         `SELECT COUNT(DISTINCT json_extract(payload_json, '$.itemId')) AS n FROM events
-          WHERE event_type = 'answer_delivered' AND created_at >= ? ${pCond}`,
+          WHERE event_type = ? AND created_at >= ? ${pCond}`,
       )
-      .get(startIso, ...pParams) as { n: number }
+      .get(DELIVERY_EVENT.ACKED, startIso, ...pParams) as { n: number }
   ).n;
   return { sessions: countTodaySessions(store, startIso, projectFilter), decisions, newItems, delivered };
 }
@@ -324,8 +325,9 @@ function olderOpenCount(
   return rows.filter((r) => !r.project_path || !archived.has(r.project_path)).length;
 }
 
-// Menschlich beantwortete, aber seit >2 h nicht abgeholte Antworten (Zustell-
-// Transparenz): delivered_at IS NULL trennt sauber die noch nicht abgeholten.
+// Menschlich beantwortete, aber seit >2 h nicht BESTÄTIGTE Antworten (Zustellung
+// v2): delivered_at IS NULL = noch nicht geackt (wartend ODER angeboten-unbestätigt).
+// dead=0 schließt die laut in der UI gezeigten toten Antworten aus (eigener Zustand).
 // Archiv-Ausschluss wie bei olderOpenCount (JS-Filter nach der Query).
 function undeliveredAnswersCount(
   store: Store,
@@ -341,7 +343,7 @@ function undeliveredAnswersCount(
     .prepare(
       `SELECT project_path FROM items
         WHERE status = 'answered' AND answered_by = 'human'
-          AND delivered_at IS NULL AND answered_at < ? ${cond}`,
+          AND delivered_at IS NULL AND dead = 0 AND answered_at < ? ${cond}`,
     )
     .all(cutoff, ...params) as Array<{ project_path: string | null }>;
   return rows.filter((r) => !r.project_path || !archived.has(r.project_path)).length;

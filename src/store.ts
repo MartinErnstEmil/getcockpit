@@ -9,7 +9,12 @@ import { normalizeProjectPath, resolveDbPath } from "./paths.js";
 import { redactText } from "./redact.js";
 import { isInternalSession } from "./transcript.js";
 import {
-  SQL_CLAIM_ANSWERS,
+  DELIVERY_EVENT,
+  SQL_CLEAR_OFFERS,
+  SQL_RESEND,
+  SQL_SELECT_OFFERABLE,
+  buildAckAnswersSql,
+  recordOfferOn,
   SQL_HAS_EVENT,
   SQL_INSERT_EVENT,
   SQL_INSERT_TURN,
@@ -82,8 +87,8 @@ export interface EnvHistoryEntry {
   at: string;
 }
 
-// Zustell-Protokoll (answer_delivered): Weg + Session + Zeitpunkt der ersten
-// Abholung einer beantworteten Karte. via='mcp' hat keine Session (sessionId null).
+// Zustell-Protokoll (answer_acked, v2): Weg + Session + Zeitpunkt der ersten
+// Bestätigung (Ack) einer beantworteten Karte. via='mcp' hat keine Session (null).
 export interface DeliveryInfo {
   at: string;
   sessionId: string | null;
@@ -156,7 +161,11 @@ export interface Item {
   answeredAt?: string;
   answeredBy?: string;
   doneAt?: string;
+  // Zustellung v2: deliveredAt = finalisiert (geackt); offeredAt = erstmals
+  // angeboten (für "unbestätigt seit"); dead = Poison-Cap erreicht (laut/umkehrbar).
   deliveredAt?: string;
+  offeredAt?: string;
+  dead?: boolean;
   // Projektspezifische laufende Nummer (#1 = ältestes Item des Projekts).
   // Berechnet beim Lesen (ROW_NUMBER über die volle Partition, keine Spalte);
   // purge eines Projekts nummeriert neu — für die Anzeige akzeptiert.
@@ -344,6 +353,8 @@ interface ItemRow {
   answered_by: string | null;
   done_at: string | null;
   delivered_at: string | null;
+  offered_at: string | null;
+  dead: number;
   project_seq?: number;
 }
 
@@ -377,6 +388,8 @@ function rowToItem(r: ItemRow): Item {
     answeredBy: r.answered_by ?? undefined,
     doneAt: r.done_at ?? undefined,
     deliveredAt: r.delivered_at ?? undefined,
+    offeredAt: r.offered_at ?? undefined,
+    dead: r.dead === 1,
     projectSeq: r.project_seq ?? undefined,
   };
 }
@@ -614,12 +627,54 @@ export class Store {
     return this.updateItem(id, { answer, status: "answered", answeredBy: by });
   }
 
-  // Atomares Beanspruchen unzugestellter menschlicher Antworten (Paket 1): liest
-  // UND quittiert in EINEM Statement (delivered_at). Wiederverwendet von
-  // pickup_answers (Paket 2). Kein Doppel mit Briefing/On-the-fly (gemeinsames
-  // delivered_at). Für project = '' werden nur globale Items (IS NULL) beansprucht.
-  claimHumanAnswers(project: string): ClaimedAnswer[] {
-    return this.prep(SQL_CLAIM_ANSWERS).all(nowIso(), normalizeProjectPath(project)) as ClaimedAnswer[];
+  // --- Zustellung v2 (offered/acked) ---------------------------------------
+  // delivered_at = "finalisiert (geackt)", NUR durch ackAnswers gesetzt. PUSH/PULL
+  // wählen aus und vermerken Angebote — sie finalisieren NIE (kein stiller Verlust).
+
+  // Ein Angebot je (item, session) atomar vermerken. true = frisch (injizieren),
+  // false = schon angeboten (Dedup, TOCTOU-frei via INSERT OR IGNORE). Bei frischem
+  // Angebot: offered_at setzen und bei erreichtem Poison-Cap totsagen (dead=1).
+  recordOffer(itemUuid: string, sessionId: string): boolean {
+    return recordOfferOn(
+      (sql, ...p) => this.prep(sql).run(...p),
+      (sql, ...p) => this.prep(sql).get(...p) as { n: number } | undefined,
+      itemUuid,
+      sessionId,
+      nowIso(),
+    );
+  }
+
+  // PULL (pickup_answers, v2): anbietbare Antworten zurückgeben UND je (item,
+  // session) als Angebot vermerken — NICHT finalisieren. itemIds scopet auf die
+  // vom Agenten erwarteten Fragen (volle UUIDs). Der MCP-Server hat keinen
+  // Session-Kontext -> Sentinel-Session für den Dedup.
+  offerForPickup(project: string, itemIds: string[] | null, sessionId: string): ClaimedAnswer[] {
+    const all = this.prep(SQL_SELECT_OFFERABLE).all(normalizeProjectPath(project)) as ClaimedAnswer[];
+    const wanted = itemIds && itemIds.length ? new Set(itemIds) : null;
+    const rows = wanted ? all.filter((r) => wanted.has(r.uuid)) : all;
+    for (const r of rows) this.recordOffer(r.uuid, sessionId);
+    return rows;
+  }
+
+  // ACK = einziger Finalisierer, exactly-once (delivered_at IS NULL guard),
+  // projekt-gescopet, VOLLE UUIDs. Gibt die tatsächlich finalisierten Zeilen zurück.
+  ackAnswers(itemIds: string[], project: string): ClaimedAnswer[] {
+    if (itemIds.length === 0) return [];
+    return this.prep(buildAckAnswersSql(itemIds.length)).all(
+      nowIso(),
+      ...itemIds,
+      normalizeProjectPath(project),
+    ) as ClaimedAnswer[];
+  }
+
+  // "Erneut senden" (Mensch): zurück in die Outbox (delivered_at/offered_at/dead
+  // zurücksetzen, Angebote löschen) — löscht NIE die Antwort.
+  resendAnswer(id: string): Item | null {
+    const item = this.getItem(id);
+    if (!item) return null;
+    this.prep(SQL_RESEND).run(item.id);
+    this.prep(SQL_CLEAR_OFFERS).run(item.id);
+    return this.mustGetItem(item.id);
   }
 
   // Entwurf serverseitig sichern (Paket A, Antwort-Flow v2): der Antworttext
@@ -661,10 +716,10 @@ export class Store {
     return this.prep(SQL_HAS_EVENT).get(eventType, sessionId) !== undefined;
   }
 
-  // Zustell-Protokoll (Zustell-Transparenz): je Item das ERSTE answer_delivered-
-  // Event (Weg + Session + Zeitpunkt). EINE gruppierte Query statt N+1. Bei
-  // Mehrfach-Events (dokumentierte Parallel-Kante) gewinnt das älteste — das
-  // erste Abholen zählt. session_id ist NULL bei via='mcp' (kein Session-Kontext).
+  // Zustell-Protokoll (Zustell-Transparenz, v2): je Item das ERSTE answer_acked-
+  // Event (Weg + Session + Zeitpunkt) — "zugestellt" heißt jetzt "vom Agenten
+  // bestätigt" (finalisiert), nicht bloß angeboten. EINE gruppierte Query statt
+  // N+1; das älteste Ack zählt. session_id ist NULL bei via='mcp'.
   deliveryInfo(itemIds: string[]): Map<string, DeliveryInfo> {
     const map = new Map<string, DeliveryInfo>();
     if (itemIds.length === 0) return map;
@@ -674,10 +729,10 @@ export class Store {
               json_extract(payload_json, '$.via') AS via,
               session_id AS sessionId, created_at AS at
          FROM events
-        WHERE event_type = 'answer_delivered'
+        WHERE event_type = ?
           AND json_extract(payload_json, '$.itemId') IN (${placeholders})
         ORDER BY created_at ASC`,
-    ).all(...itemIds) as Array<{ itemId: string; via: string; sessionId: string | null; at: string }>;
+    ).all(DELIVERY_EVENT.ACKED, ...itemIds) as Array<{ itemId: string; via: string; sessionId: string | null; at: string }>;
     for (const r of rows) {
       if (!map.has(r.itemId)) map.set(r.itemId, { at: r.at, sessionId: r.sessionId, via: r.via });
     }

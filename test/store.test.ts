@@ -224,9 +224,9 @@ describe("items CRUD (PRD F5)", () => {
   it("deliveryInfo: bei Mehrfach-Events gewinnt das älteste (erstes Abholen)", () => {
     const item = store.addItem({ type: "question", title: "Mehrfach?", projectPath: "c:/dev/d" });
     store.answerItem(item.id, "ja", "human");
-    // Dokumentierte Parallel-Kante: prompt zuerst abgeholt, dann briefing.
-    const e1 = store.recordEvent({ eventType: "answer_delivered", sessionId: "s-old", payload: { itemId: item.id, via: "prompt" } });
-    const e2 = store.recordEvent({ eventType: "answer_delivered", sessionId: "s-new", payload: { itemId: item.id, via: "briefing" } });
+    // Parallel-Kante: zwei Ack-Events (answer_acked) fürs selbe Item.
+    const e1 = store.recordEvent({ eventType: "answer_acked", sessionId: "s-old", payload: { itemId: item.id, via: "prompt" } });
+    const e2 = store.recordEvent({ eventType: "answer_acked", sessionId: "s-new", payload: { itemId: item.id, via: "briefing" } });
     const setAt = store.rawDb().prepare("UPDATE events SET created_at = ? WHERE uuid = ?");
     setAt.run("2026-07-12T10:00:00.000Z", e1.id);
     setAt.run("2026-07-12T11:00:00.000Z", e2.id);

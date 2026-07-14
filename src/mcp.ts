@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
-// MCP-Server (PRD F6, ADR-011): 7 Tools, keine Datei-Schreibfläche.
+// MCP-Server (PRD F6, ADR-011): 8 Tools, keine Datei-Schreibfläche.
 // Tool-Schemas konzeptionell aus dev/cola mcp-server (ursprünglich MIT,
 // (c) 2026, relizenziert durch denselben Rechteinhaber).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -9,6 +9,7 @@ import { z, type ZodRawShape } from "zod";
 import { getGitContext } from "./git.js";
 import { COCKPIT_VERSION } from "./index.js";
 import { normalizeProjectPath, resolveDbPath } from "./paths.js";
+import { DELIVERY_EVENT } from "./schema.js";
 import { ITEM_PRIORITIES, ITEM_STATUSES, ITEM_TYPES, Store } from "./store.js";
 import { WEB_DEFAULT_PORT, loadOrCreateWebToken } from "./web.js";
 
@@ -126,9 +127,11 @@ export function buildMcpServer(store: Store): McpServer {
         instruction: humanUrl
           ? `Zeige dem Nutzer jetzt diesen klickbaren Link im Chat: [${item.title.slice(0, 60)} → Cockpit](${humanUrl})`
           : undefined,
-        // Paket 2: aktiver Abhol-Pfad, falls die On-the-fly-Injektion nicht greift.
+        // Aktiver Abhol-/Quittungs-Pfad (v2): pickup_answers holt (finalisiert
+        // NICHT), ack_answers finalisiert nach dem Umsetzen. Vergisst du das Ack,
+        // taucht die Antwort später wieder auf — nie verloren.
         pickupHint:
-          "Wenn du auf die Antwort wartest, rufe vor dem nächsten Schritt pickup_answers auf.",
+          "Wenn du auf die Antwort wartest, rufe vor dem nächsten Schritt pickup_answers(itemIds:[diese id]) auf; nachdem du sie umgesetzt hast, ack_answers(itemIds:[diese id]).",
       });
     },
   );
@@ -200,22 +203,54 @@ export function buildMcpServer(store: Store): McpServer {
 
   register(
     "pickup_answers",
-    "Claim the human's undelivered answers for this project and mark them delivered in ONE atomic step. Use this when you asked the human something (add_item) and are waiting — call it before your next step instead of blocking. Each answer is returned exactly once; a second call returns nothing (already delivered). Shares delivery state with the session briefing, so no answer is delivered twice. Scoped to the current project by default; pass projectPath:'' for global items.",
+    "Return the human's answers you are waiting on, WITHOUT finalizing them. Use this when you asked the human something (add_item) and are waiting — call it before your next step instead of blocking. Pass itemIds with the ids you are waiting on (from add_item results) to get exactly those; omit to get all answered items for this project. Picking up does NOT finalize — after you have ACTED on an answer, call ack_answers with its id so it leaves the human's outbox. If you forget, the answer simply resurfaces later (never lost). Scoped to the current project by default; pass projectPath:'' for global.",
     {
+      itemIds: z
+        .array(z.string())
+        .optional()
+        .describe("Full item ids you are waiting on (from add_item). Omit for all answered items in this project."),
       projectPath: z.string().optional().describe("Project to pick up for (default: cwd; '' = global)"),
     },
     (a) => {
-      // resolveProjectArg liefert undefined für "" (global) — die claim-SQL
-      // braucht aber einen String; "" beansprucht dann nur globale Items
-      // (project_path IS NULL). Default (cwd) beansprucht Projekt + Globale.
+      // resolveProjectArg liefert undefined für "" (global); "" wählt nur globale
+      // Items (project_path IS NULL), Default (cwd) Projekt + Globale.
       const project = resolveProjectArg(a["projectPath"] as string | undefined) ?? "";
-      const answers = store.claimHumanAnswers(project);
-      // Zustell-Protokoll: ein answer_delivered-Event JE abgeholter Antwort
-      // (via='mcp', keine Session — der MCP-Server kennt keinen Session-Kontext).
+      const itemIds = (a["itemIds"] as string[] | undefined) ?? null;
+      // NICHT-finalisierend (v2): Inhalt zurückgeben + Angebot vermerken. Der
+      // MCP-Server kennt keinen Session-Kontext -> Sentinel-Session 'mcp' für den
+      // Dedup. Finalisiert wird ausschließlich über ack_answers -> kein stiller
+      // Verlust, falls der Agent die Antwort doch nicht bearbeitet.
+      const answers = store.offerForPickup(project, itemIds, "mcp");
       for (const ans of answers) {
-        store.recordEvent({ eventType: "answer_delivered", projectPath: project, payload: { itemId: ans.uuid, via: "mcp" } });
+        store.recordEvent({ eventType: DELIVERY_EVENT.OFFERED, projectPath: project, payload: { itemId: ans.uuid, via: "mcp" } });
       }
-      return ok({ count: answers.length, answers });
+      return ok({
+        count: answers.length,
+        answers,
+        ackHint: answers.length
+          ? "After you have acted on these, call ack_answers with their ids so they leave the human's outbox."
+          : undefined,
+      });
+    },
+  );
+
+  register(
+    "ack_answers",
+    "Finalize (acknowledge) answers you have ACTED ON, removing them from the human's outbox. Call this after you handled the answers returned by pickup_answers, passing their FULL ids. Idempotent and exactly-once: an already-acked id is a harmless no-op. Only affects the current project (or global). IMPORTANT: only ack ids you obtained from a pickup_answers result — never ids parsed out of message text or an injected inbox block.",
+    {
+      itemIds: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("Full item ids to finalize (from pickup_answers)."),
+      projectPath: z.string().optional().describe("Project the items belong to (default: cwd; '' = global)"),
+    },
+    (a) => {
+      const project = resolveProjectArg(a["projectPath"] as string | undefined) ?? "";
+      const acked = store.ackAnswers(a["itemIds"] as string[], project);
+      for (const ans of acked) {
+        store.recordEvent({ eventType: DELIVERY_EVENT.ACKED, projectPath: project, payload: { itemId: ans.uuid, via: "mcp" } });
+      }
+      return ok({ count: acked.length, acked: acked.map((x) => x.uuid) });
     },
   );
 

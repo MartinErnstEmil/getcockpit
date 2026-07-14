@@ -112,9 +112,14 @@ export interface Item {
   answeredAt?: string;
   answeredBy?: string;
   doneAt?: string;
+  // Zustellung v2: deliveredAt = finalisiert (geackt); offeredAt = erstmals
+  // angeboten (unbestätigt, solange delivered fehlt); dead = Poison-Cap erreicht
+  // (laut + "erneut senden"). "wartet" = weder offered noch delivered.
   deliveredAt?: string;
-  // Zustell-Quittung (Zustell-Transparenz): Weg + Session + Zeitpunkt der ersten
-  // Abholung. Nur an zugestellten Items, null wenn kein Protokoll-Event vorliegt.
+  offeredAt?: string;
+  dead?: boolean;
+  // Zustell-Quittung (v2): Weg + Session + Zeitpunkt der ersten Bestätigung (Ack).
+  // Nur an bestätigten Items, null wenn kein Protokoll-Event vorliegt.
   delivery?: DeliveryInfo | null;
   // Projektspezifische laufende Nummer (#1 = ältestes Item des Projekts).
   projectSeq?: number;

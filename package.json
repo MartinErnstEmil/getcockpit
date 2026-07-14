@@ -1,6 +1,6 @@
 {
   "name": "getcockpit",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "The project state that writes itself: searchable archive of all your Claude Code sessions, portfolio status, standups and a persistent agent inbox. Local-first, no cloud, no embeddings.",
   "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {

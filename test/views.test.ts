@@ -166,9 +166,9 @@ describe("portfolioView (PRD F10)", () => {
   it("today.delivered zählt heute abgeholte Antworten (DISTINCT itemId)", () => {
     addTurn("u-1", "c:/dev/p", 5 * MIN);
     const it = ts.store.addItem({ type: "question", title: "abgeholt?", projectPath: "c:/dev/p", source: "claude" });
-    // Zwei answer_delivered-Events fürs selbe Item (Parallel-Kante), heute.
-    const e1 = ts.store.recordEvent({ eventType: "answer_delivered", projectPath: "c:/dev/p", payload: { itemId: it.id, via: "prompt" } });
-    const e2 = ts.store.recordEvent({ eventType: "answer_delivered", projectPath: "c:/dev/p", payload: { itemId: it.id, via: "briefing" } });
+    // Zwei answer_acked-Events fürs selbe Item (Parallel-Kante), heute.
+    const e1 = ts.store.recordEvent({ eventType: "answer_acked", projectPath: "c:/dev/p", payload: { itemId: it.id, via: "prompt" } });
+    const e2 = ts.store.recordEvent({ eventType: "answer_acked", projectPath: "c:/dev/p", payload: { itemId: it.id, via: "briefing" } });
     const setAt = ts.store.rawDb().prepare("UPDATE events SET created_at = ? WHERE uuid = ?");
     setAt.run(iso(1 * MIN), e1.id);
     setAt.run(iso(1 * MIN), e2.id);

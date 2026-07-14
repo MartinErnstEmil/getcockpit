@@ -889,6 +889,13 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       const item = store.answerItem(body.id, body.answer, "human");
       return item ? sendJson(res, 200, { item }) : sendJson(res, 404, { error: "item not found" });
     }
+    // "Erneut senden" (Zustellung v2): eine tote/unbestätigte Antwort zurück in
+    // die Outbox (delivered_at/offered_at/dead zurücksetzen, Angebote löschen).
+    // Löscht NIE die Antwort — nur der Mensch löst das aus.
+    if (url.pathname === "/api/answer-resend") {
+      const item = store.resendAnswer(body.id);
+      return item ? sendJson(res, 200, { item }) : sendJson(res, 404, { error: "item not found" });
+    }
     // Entwurf serverseitig sichern (Paket A): persistiert die Antwort, ohne sie
     // zuzustellen. Getrennt von /api/answer, damit answered exklusiv beim
     // Zustell-Pfad bleibt (answered_by!). Die Zustellung erfolgt danach über

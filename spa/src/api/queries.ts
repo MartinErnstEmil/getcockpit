@@ -195,6 +195,16 @@ export function useUpdateStatus() {
   });
 }
 
+// "Erneut senden" (Zustellung v2): eine tote/unbestätigte Antwort zurück in die
+// Outbox — löscht nie die Antwort, nur der Mensch löst das aus.
+export function useResendAnswer() {
+  const invalidate = useInvalidateAfterChange();
+  return useMutation({
+    mutationFn: (v: { id: string }) => apiPost<{ item: Item }>("/api/answer-resend", v),
+    onSuccess: invalidate,
+  });
+}
+
 export function useAssist() {
   return useMutation({
     // persona = Expertenlevel, lang = Oberflächensprache (U3) aus den

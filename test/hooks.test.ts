@@ -202,23 +202,26 @@ describe("hook bundle E2E (UserPromptSubmit)", () => {
     expect(out.hookSpecificOutput.additionalContext).not.toContain("vom Agenten");
     console.log(`[hooks] On-the-fly UserPromptSubmit-Latenz inkl. Spawn: ${first.ms.toFixed(0)} ms`);
 
-    // Zweiter Prompt: quittiert (delivered_at) → keine erneute Injektion.
+    // Zweiter Prompt DERSELBEN Session: Dedup (answer_offers) → keine erneute Injektion.
     const second = runHook(payload);
     expect(second.status).toBe(0);
     expect(second.stdout.trim()).toBe("");
 
     const store2 = openDb();
-    const row = store2.rawDb().prepare("SELECT delivered_at FROM items WHERE uuid = ?").get(item.id) as {
+    const row = store2.rawDb().prepare("SELECT offered_at, delivered_at FROM items WHERE uuid = ?").get(item.id) as {
+      offered_at: string | null;
       delivered_at: string | null;
     };
-    // Zustell-Protokoll: genau EIN answer_delivered-Event (via=prompt, session)
-    // — die zweite (leere) Injektion beansprucht nichts, schreibt also keins.
+    // Angebots-Protokoll: genau EIN answer_offered-Event (via=prompt, session)
+    // — die zweite (leere) Injektion bietet nichts an, schreibt also keins. v2:
+    // angeboten (offered_at), aber NICHT finalisiert (delivered_at bleibt NULL).
     const ev = store2
       .rawDb()
-      .prepare("SELECT session_id, payload_json FROM events WHERE event_type='answer_delivered'")
+      .prepare("SELECT session_id, payload_json FROM events WHERE event_type='answer_offered'")
       .all() as Array<{ session_id: string | null; payload_json: string }>;
     store2.close();
-    expect(row.delivered_at).toBeTruthy();
+    expect(row.offered_at).toBeTruthy();
+    expect(row.delivered_at).toBeNull();
     expect(ev).toHaveLength(1);
     expect(JSON.parse(ev[0]!.payload_json)).toEqual({ itemId: item.id, via: "prompt" });
     expect(ev[0]!.session_id).toBe("s-live");

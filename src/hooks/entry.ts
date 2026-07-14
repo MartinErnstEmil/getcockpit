@@ -9,9 +9,10 @@ import { dirname, join } from "node:path";
 import { collectGitState } from "../gitinfo.js";
 import { cockpitHome, deadLetterPath, hooksLogPath, resolveDbPath } from "../paths.js";
 import { redactText } from "../redact.js";
+import { DELIVERY_EVENT } from "../schema.js";
 import { createInternalSessionFilter, parseTranscriptLine, type TranscriptTurn } from "../transcript.js";
 import { buildBriefing, renderClaimedContext } from "./briefing.js";
-import { captureEnabled, claimHumanAnswers, gitMode, insertHookTurn, openHookDb, recordHookEvent, upsertGitState } from "./hookdb.js";
+import { captureEnabled, gitMode, insertHookTurn, offerHumanAnswers, openHookDb, recordHookEvent, upsertGitState } from "./hookdb.js";
 import { takeAutoSnapshot } from "./snapshot.js";
 
 const TAIL_BYTES = 256 * 1024;
@@ -85,19 +86,21 @@ function handlePrompt(payload: HookPayload): void {
       projectPath: payload.cwd,
       payload: { prompt: redactText(prompt).text },
     });
-    // On-the-fly-Zustellung (Paket 1): menschliche Antworten dieses Projekts
-    // atomar beanspruchen und als additionalContext injizieren — beim nächsten
-    // Prompt derselben laufenden Session, ohne neuen Prozess/Kanal. Nur bei
-    // Treffer valides JSON auf stdout (Hook-Parsing sonst gebrochen). Kein
-    // Git-Collect/Tail-Read auf diesem Pre-Turn-Pfad (Latenz).
+    // On-the-fly-PUSH (v2, beratend): anbietbare menschliche Antworten dieses
+    // Projekts je (item, session) atomar als Angebot vermerken und die FRISCH
+    // angebotenen als additionalContext injizieren — beim nächsten Prompt der
+    // laufenden Session. FINALISIERT NICHT (delivered_at bleibt NULL; erst der
+    // ACK finalisiert), also kein stiller Verlust bei ignoriertem Kontext. Dedup
+    // verhindert Neu-Injektion derselben Antwort in dieselbe Session je Turn.
+    // Nur bei Treffer valides JSON auf stdout. Kein Git-Collect/Tail-Read hier (Latenz).
     if (payload.cwd) {
-      const claimed = claimHumanAnswers(db, payload.cwd);
-      if (claimed.length > 0) {
-        // Zustell-Protokoll: ein answer_delivered-Event JE beanspruchter Antwort
-        // (via='prompt', session vorhanden). Billige Inserts, kein Extra-Budget.
-        for (const c of claimed) {
+      const offered = offerHumanAnswers(db, payload.cwd, payload.session_id);
+      if (offered.length > 0) {
+        // Angebots-Protokoll: ein answer_offered-Event JE frisch angebotener
+        // Antwort (via='prompt'). "Zugestellt" (acked) wird separat protokolliert.
+        for (const c of offered) {
           recordHookEvent(db, {
-            eventType: "answer_delivered",
+            eventType: DELIVERY_EVENT.OFFERED,
             sessionId: payload.session_id,
             projectPath: payload.cwd,
             payload: { itemId: c.uuid, via: "prompt" },
@@ -107,7 +110,7 @@ function handlePrompt(payload: HookPayload): void {
           JSON.stringify({
             hookSpecificOutput: {
               hookEventName: "UserPromptSubmit",
-              additionalContext: renderClaimedContext(claimed),
+              additionalContext: renderClaimedContext(offered),
             },
           }) + "\n",
         );

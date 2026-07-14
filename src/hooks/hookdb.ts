@@ -10,14 +10,15 @@ import { normalizeProjectPath } from "../paths.js";
 import {
   MIGRATIONS,
   PRAGMAS,
-  SQL_CLAIM_ANSWERS,
   SQL_INSERT_EVENT,
   SQL_INSERT_TURN,
   SQL_SELECT_CAPTURE,
   SQL_SELECT_GITMODE,
+  SQL_SELECT_OFFERABLE,
   SQL_UPSERT_GIT_STATE,
   eventInsertParams,
   gitStateParams,
+  recordOfferOn,
   turnInsertParams,
   type ClaimedAnswer,
   type EventParamsInput,
@@ -66,12 +67,30 @@ export function upsertGitState(db: DatabaseSync, g: GitStateInput): void {
   db.prepare(SQL_UPSERT_GIT_STATE).run(...gitStateParams(g));
 }
 
-// Zwilling zu store.claimHumanAnswers für node:sqlite (Hook-Bundle): atomares
-// Beanspruchen unzugestellter menschlicher Antworten via SQL_CLAIM_ANSWERS.
-export function claimHumanAnswers(db: DatabaseSync, project: string): ClaimedAnswer[] {
-  return db
-    .prepare(SQL_CLAIM_ANSWERS)
-    .all(nowIso(), normalizeProjectPath(project)) as unknown as ClaimedAnswer[];
+// Ein Angebot je (item, session) atomar vermerken (node:sqlite-Zwilling zu
+// store.recordOffer). true = frisch (injizieren), false = schon angeboten (Dedup).
+export function recordOffer(db: DatabaseSync, itemUuid: string, sessionId: string): boolean {
+  return recordOfferOn(
+    (sql, ...p) => db.prepare(sql).run(...p),
+    (sql, ...p) => db.prepare(sql).get(...p) as { n: number } | undefined,
+    itemUuid,
+    sessionId,
+    nowIso(),
+  );
+}
+
+// PUSH v2 (Hook, node:sqlite): anbietbare menschliche Antworten auswählen und je
+// (item, session) atomar ein Angebot vermerken. Gibt NUR die FRISCH angebotenen
+// zurück (changes()=1) — genau die werden injiziert. Finalisiert NIE (delivered_at
+// bleibt NULL; erst der ACK finalisiert). Verhindert Doppel-Injektion in dieselbe
+// Session (Dedup) und Briefing∩Prompt-TOCTOU (atomares INSERT OR IGNORE).
+export function offerHumanAnswers(db: DatabaseSync, project: string, sessionId: string): ClaimedAnswer[] {
+  const rows = db.prepare(SQL_SELECT_OFFERABLE).all(normalizeProjectPath(project)) as unknown as ClaimedAnswer[];
+  const fresh: ClaimedAnswer[] = [];
+  for (const r of rows) {
+    if (recordOffer(db, r.uuid, sessionId)) fresh.push(r);
+  }
+  return fresh;
 }
 
 // Capture-Opt-out via DB (Paket 5): fehlender Eintrag ODER capture_enabled=1 →

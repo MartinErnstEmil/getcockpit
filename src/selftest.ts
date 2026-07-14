@@ -76,9 +76,11 @@ export function runDeliverySelftest(bundleOverride?: string): SelftestResult {
     if (!context.includes(marker)) return finish(false, "Antwort fehlte im injizierten Kontext");
 
     const check = Store.open(dbPath);
-    const delivered = !!check.getItem(item.id)?.deliveredAt;
+    // Zustellung v2: der Hook ANBIETET (offered_at), finalisiert aber nicht
+    // (delivered_at bleibt NULL bis zum ACK). Der Beweis der Kette ist das Angebot.
+    const offered = !!check.getItem(item.id)?.offeredAt;
     check.close();
-    if (!delivered) return finish(false, "Item wurde nicht als zugestellt markiert");
+    if (!offered) return finish(false, "Item wurde nicht als angeboten markiert");
 
     return finish(true, notInstalledHint);
   } catch (err) {
