@@ -18,7 +18,7 @@ Die Anwender-Doku ist `docs/HANDBUCH.md` (liegt im Paket).
 Du hast eine Datei `getcockpit-<version>.tgz` bekommen. Installiere sie global:
 
 ```
-npm install -g ./getcockpit-0.4.0.tgz
+npm install -g ./getcockpit-0.5.0.tgz
 cockpit --version
 ```
 
