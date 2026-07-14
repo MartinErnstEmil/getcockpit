@@ -135,6 +135,13 @@ export interface SelftestResult {
   reason?: string;
 }
 
+// Update-Verfügbarkeit (GET /api/update): fail-open, latest=null wenn offline.
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+}
+
 export interface DecisionEntry {
   id: string;
   type: string;

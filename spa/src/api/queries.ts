@@ -29,6 +29,7 @@ import type {
   StatusBrief,
   StatusResponse,
   TurnHit,
+  UpdateInfo,
 } from "./types";
 import { getExpertLevel, getLocale } from "@/lib/prefs";
 import type { Scope } from "@/lib/scope";
@@ -375,6 +376,17 @@ export function useSessionMarkers(sessionId: string | null) {
       apiFetch<{ markers: SessionMarker[] }>(
         `/api/session-markers?session=${encodeURIComponent(sessionId ?? "")}`,
       ),
+  });
+}
+
+// Update-Verfügbarkeit (nicht-blockierend, fail-open). 1 h frisch — der Stand
+// ändert sich nicht minütlich; kein Retry (offline ist ein gültiges Ergebnis).
+export function useUpdate() {
+  return useQuery({
+    queryKey: ["update"],
+    queryFn: () => apiFetch<UpdateInfo>("/api/update"),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
   });
 }
 

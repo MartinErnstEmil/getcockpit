@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
 import Sidebar from "./components/Sidebar";
 import HooksBanner from "./components/HooksBanner";
+import UpdateBanner from "./components/UpdateBanner";
 import EmptyState from "./components/EmptyState";
 
 // Code-Split je Route (eigener Chunk, erst bei Navigation geladen).
@@ -29,6 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       </aside>
       <main className="row-start-2 min-h-0 min-w-0 overflow-y-auto">
         <HooksBanner />
+        <UpdateBanner />
         <Suspense fallback={<EmptyState title="Lädt…" />}>{children}</Suspense>
       </main>
     </div>
