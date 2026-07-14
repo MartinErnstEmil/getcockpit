@@ -57,6 +57,31 @@ export interface ProjectAdmin {
   openItems: number;
 }
 
+// Env-Tab: NICHT-geheime Metadaten je Umgebungsvariable. Der Wert selbst wird
+// NIE hier gehalten — er lebt nur in der echten .env auf der Platte (write-only).
+export interface EnvSpec {
+  projectPath: string; // '' = global (~/.claude/.env)
+  keyName: string;
+  why: string;
+  how: string;
+  what: string;
+  serviceLink: string;
+  source: string; // 'manual' | 'scanned' | 'ad-hoc'
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Env-Tab: Änderungs-Protokoll (Audit) OHNE Secret-Werte. change ist z. B.
+// 'value_set' | 'spec_edited' | 'removed'; detail trägt nie den Wert.
+export interface EnvHistoryEntry {
+  id: number;
+  projectPath: string;
+  keyName: string;
+  change: string;
+  detail: string;
+  at: string;
+}
+
 // Zustell-Protokoll (answer_delivered): Weg + Session + Zeitpunkt der ersten
 // Abholung einer beantworteten Karte. via='mcp' hat keine Session (sessionId null).
 export interface DeliveryInfo {
@@ -81,6 +106,27 @@ function assertOneOf(field: string, value: string, allowed: ReadonlyArray<string
   if (!allowed.includes(value)) {
     throw new Error(`Ungültiger Wert für ${field}: "${value}" (erlaubt: ${allowed.join(", ")})`);
   }
+}
+
+// Env-Tab: Projektpfad kanonisieren; '' bleibt '' (global). normalizeProjectPath
+// gibt '' unverändert zurück, deckt aber c:/x vs c:\x ab (dieselbe Wahrheit wie
+// überall sonst im Store).
+function envProject(project: string): string {
+  return project ? normalizeProjectPath(project) : "";
+}
+
+function envSpecFromRow(r: Record<string, string>): EnvSpec {
+  return {
+    projectPath: r["project_path"]!,
+    keyName: r["key_name"]!,
+    why: r["why"]!,
+    how: r["how"]!,
+    what: r["what"]!,
+    serviceLink: r["service_link"]!,
+    source: r["source"]!,
+    createdAt: r["created_at"]!,
+    updatedAt: r["updated_at"]!,
+  };
 }
 
 export interface Anchor {
@@ -807,6 +853,72 @@ export class Store {
       recentCommits: JSON.parse(r.recent_commits) as GitStateRow["recentCommits"],
       gitMode: modes.get(r.project_path) ?? DEFAULT_GIT_MODE,
       updatedAt: r.updated_at,
+    }));
+  }
+
+  // --- Env-Tab (Metadaten + Audit) ------------------------------------------
+  // project_path wird normalisiert; '' bleibt '' (global). Werte fasst der Store
+  // NIE an — Secrets leben ausschließlich in der echten .env (siehe env.ts).
+
+  listEnvSpecs(project?: string): EnvSpec[] {
+    const rows = (
+      project === undefined
+        ? this.prep("SELECT * FROM env_specs ORDER BY project_path, key_name").all()
+        : this.prep("SELECT * FROM env_specs WHERE project_path = ? ORDER BY key_name").all(envProject(project))
+    ) as Array<Record<string, string>>;
+    return rows.map(envSpecFromRow);
+  }
+
+  upsertEnvSpec(spec: {
+    project: string;
+    keyName: string;
+    why?: string;
+    how?: string;
+    what?: string;
+    serviceLink?: string;
+    source?: string;
+  }): EnvSpec {
+    const now = nowIso();
+    const p = envProject(spec.project);
+    this.prep(
+      `INSERT INTO env_specs (project_path, key_name, why, how, what, service_link, source, created_at, updated_at)
+       VALUES (@p, @k, @why, @how, @what, @link, @source, @now, @now)
+       ON CONFLICT(project_path, key_name) DO UPDATE SET
+         why = @why, how = @how, what = @what, service_link = @link, source = @source, updated_at = @now`,
+    ).run({
+      p,
+      k: spec.keyName,
+      why: spec.why ?? "",
+      how: spec.how ?? "",
+      what: spec.what ?? "",
+      link: spec.serviceLink ?? "",
+      source: spec.source ?? "manual",
+      now,
+    });
+    const row = this.prep("SELECT * FROM env_specs WHERE project_path = ? AND key_name = ?").get(p, spec.keyName) as Record<string, string>;
+    return envSpecFromRow(row);
+  }
+
+  recordEnvHistory(e: { project: string; keyName: string; change: string; detail?: string }): void {
+    this.prep(
+      "INSERT INTO env_history (project_path, key_name, change, detail, at) VALUES (?, ?, ?, ?, ?)",
+    ).run(envProject(e.project), e.keyName, e.change, e.detail ?? "", nowIso());
+  }
+
+  listEnvHistory(project: string, keyName?: string): EnvHistoryEntry[] {
+    const p = envProject(project);
+    const rows = (
+      keyName
+        ? this.prep("SELECT * FROM env_history WHERE project_path = ? AND key_name = ? ORDER BY id DESC LIMIT 200").all(p, keyName)
+        : this.prep("SELECT * FROM env_history WHERE project_path = ? ORDER BY id DESC LIMIT 200").all(p)
+    ) as Array<{ id: number; project_path: string; key_name: string; change: string; detail: string; at: string }>;
+    return rows.map((r) => ({
+      id: r.id,
+      projectPath: r.project_path,
+      keyName: r.key_name,
+      change: r.change,
+      detail: r.detail,
+      at: r.at,
     }));
   }
 

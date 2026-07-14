@@ -14,6 +14,7 @@ const SearchPage = lazy(() => import("./routes/SearchPage"));
 const SessionsPage = lazy(() => import("./routes/SessionsPage"));
 const GitPage = lazy(() => import("./routes/GitPage"));
 const FilesPage = lazy(() => import("./routes/FilesPage"));
+const EnvPage = lazy(() => import("./routes/EnvPage"));
 const ReportPage = lazy(() => import("./routes/ReportPage"));
 const SettingsPage = lazy(() => import("./routes/SettingsPage"));
 
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/git" element={<GitPage />} />
         <Route path="/files" element={<FilesPage />} />
         <Route path="/files/:key" element={<FilesPage />} />
+        <Route path="/env" element={<EnvPage />} />
         <Route path="/report" element={<ReportPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/overview" replace />} />

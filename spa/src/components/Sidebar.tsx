@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { LayoutDashboard, Inbox, GitBranch, Search, History, FileText, BookOpen, ClipboardList } from "lucide-react";
+import { LayoutDashboard, Inbox, GitBranch, Search, History, FileText, BookOpen, ClipboardList, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useScope } from "@/lib/useScope";
@@ -35,6 +35,7 @@ const NAV: Array<{ to: string; key: string; Icon: ComponentType<{ className?: st
   { to: "/sessions", key: "nav.sessions", Icon: History },
   { to: "/git", key: "nav.git", Icon: GitLogoIcon },
   { to: "/files", key: "nav.files", Icon: FileText },
+  { to: "/env", key: "nav.env", Icon: KeyRound },
 ];
 
 export default function Sidebar() {

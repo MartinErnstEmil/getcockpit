@@ -307,6 +307,61 @@ export interface ComposerApplyResult {
   copyOnly: SnippetMeta[];
 }
 
+// --- Env-Tab (Spiegel von env.ts / store.ts) --------------------------------
+// SICHERHEIT: der Server liefert NIE einen Wert — nur Namen + gesetzt/leer und
+// die nicht-geheimen Metadaten. Werte werden write-only in die echte .env
+// geschrieben, nie in der DB gehalten.
+
+export interface EnvSpecMeta {
+  why: string;
+  how: string;
+  what: string;
+  serviceLink: string;
+  source: string;
+}
+
+export interface EnvVarView {
+  key: string;
+  present: boolean; // Schlüssel steht in der .env auf der Platte
+  hasValue: boolean; // present UND nicht-leerer Wert
+  inExample: boolean;
+  spec: EnvSpecMeta | null;
+}
+
+export interface EnvProjectView {
+  projectPath: string; // '' = global
+  label: string;
+  envFile: string;
+  envExists: boolean;
+  exampleExists: boolean;
+  gitignore: { isRepo: boolean; ignored: boolean };
+  vars: EnvVarView[];
+}
+
+export interface EnvHistoryEntry {
+  id: number;
+  projectPath: string;
+  keyName: string;
+  change: string; // value_set | value_set_new | spec_edited | ...
+  detail: string;
+  at: string;
+}
+
+// Antwort von /api/env-assist: roher Haiku-Text (JSON-Array) + die gescannten
+// Namen. Die SPA parst das Array defensiv (parseEnvAssist).
+export interface EnvAssistResponse {
+  text: string;
+  detectedKeys: string[];
+}
+
+export interface EnvRequirement {
+  key: string;
+  why: string;
+  how: string;
+  what: string;
+  link: string;
+}
+
 // --- Git-Tab (Transparenz) ---------------------------------------------------
 
 export interface GitStateRow {

@@ -244,6 +244,33 @@ export const MIGRATIONS: ReadonlyArray<string> = [
   `
   ALTER TABLE project_settings ADD COLUMN git_mode TEXT NOT NULL DEFAULT 'advisory';
   `,
+  // v5 (Env-Tab): NICHT-geheime Metadaten je Umgebungsvariable (das WARUM/WIE/WAS
+  // + Service-Link) und ein Änderungs-Protokoll. SICHERHEIT: hier landet NIE ein
+  // Wert — Secrets leben ausschließlich in der echten .env auf der Platte
+  // (write-only). project_path = '' bedeutet global (~/.claude/.env).
+  `
+  CREATE TABLE env_specs (
+    project_path TEXT NOT NULL,
+    key_name TEXT NOT NULL,
+    why TEXT NOT NULL DEFAULT '',
+    how TEXT NOT NULL DEFAULT '',
+    what TEXT NOT NULL DEFAULT '',
+    service_link TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (project_path, key_name)
+  );
+  CREATE TABLE env_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL,
+    key_name TEXT NOT NULL,
+    change TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL
+  );
+  CREATE INDEX env_history_key ON env_history(project_path, key_name);
+  `,
 ];
 
 // Geteilt zwischen Store (better-sqlite3) und Hook-Bundle (node:sqlite): Upsert

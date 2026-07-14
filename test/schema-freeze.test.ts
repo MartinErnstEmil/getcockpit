@@ -14,6 +14,7 @@ const FROZEN_SHA256 = [
   "bb4f36008ce0493d7a72b5029a920826951b021675637516d1ec633d99e42fa8", // v2: git_state (F10)
   "fc1c3fa0fc40c8f30401186d021ab623a674c7b1146fb83ca94c1855b482bfaf", // v3: project_settings (Paket 5)
   "6072b57ea6ca767488d6a004be0c1c3e02248e5b010db6f22f1c0c8dcb93cc96", // v4: project_settings.git_mode (Git-Modi)
+  "94622c003c9c9eb2ac2bf15b0d43caec37cdfad531afa84cd46e32703ea932aa", // v5: env_specs + env_history (Env-Tab)
 ];
 
 describe("MIGRATIONS eingefroren (append-only)", () => {

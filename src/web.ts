@@ -10,9 +10,10 @@ import { createServer } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cockpitHome } from "./paths.js";
-import { ASSIST_KINDS, parseAssistPrefs, runAssist, runGitAssist, type AssistKind } from "./assist.js";
+import { ASSIST_KINDS, parseAssistPrefs, runAssist, runEnvAssist, runGitAssist, type AssistKind } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
+import { addEnvToGitignore, envView, resolveEnvTarget, scanEnvKeys, writeEnvVar } from "./env.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
 import { runDeliverySelftest } from "./selftest.js";
@@ -399,6 +400,19 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       });
       return sendJson(res, 200, { entries });
     }
+    // Env-Tab: .env je Projekt (+ global). SICHERHEIT: liefert NUR Namen +
+    // gesetzt/leer und die nicht-geheimen Metadaten — nie einen Wert (env.ts).
+    if (req.method === "GET" && url.pathname === "/api/env") {
+      const projects = envView(store, { project: url.searchParams.get("project") ?? undefined });
+      return sendJson(res, 200, { projects });
+    }
+    // Env-Tab: Änderungs-Protokoll einer Variable bzw. eines Projekts (Audit,
+    // ohne Secret-Werte). project="" = global.
+    if (req.method === "GET" && url.pathname === "/api/env-history") {
+      const project = url.searchParams.get("project") ?? "";
+      const key = url.searchParams.get("key") ?? undefined;
+      return sendJson(res, 200, { history: store.listEnvHistory(project, key) });
+    }
     // Config-Baukasten (U6): kuratierter Snippet-Katalog (mit Bodies — klein
     // genug, spart einen zweiten Call für die Vorschau).
     if (req.method === "GET" && url.pathname === "/api/composer/snippets") {
@@ -663,6 +677,65 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
         store.recordEvent({ eventType: "git_assist", projectPath: project, payload: { ok: result.ok } });
         if (!result.ok) return sendJson(res, 502, { error: result.error });
         return sendJson(res, 200, { text: result.text });
+      } finally {
+        assistBusy = false;
+      }
+    }
+
+    // --- Env-Tab (POST) ------------------------------------------------------
+    // Alle tragen project (Selektor, NIE Rohpfad) statt id — daher vor dem
+    // id-Zwang. Werte werden write-only in die echte .env geschrieben (env.ts),
+    // nie in der DB gehalten; das Protokoll speichert nur den NAMEN, nie den Wert.
+    if (url.pathname === "/api/env-write") {
+      const b = body as { project?: string; key?: string; value?: string };
+      const key = (b.key ?? "").trim();
+      if (!key) return sendJson(res, 400, { error: "key fehlt" });
+      if (typeof b.value !== "string") return sendJson(res, 400, { error: "value fehlt" });
+      const result = writeEnvVar(store, b.project ?? "", key, b.value);
+      if (!result.ok) return sendJson(res, result.status, { error: result.error });
+      // Audit OHNE Wert: nur der Name + ob die Datei neu angelegt wurde.
+      store.recordEnvHistory({ project: b.project ?? "", keyName: key, change: result.created ? "value_set_new" : "value_set" });
+      store.recordEvent({ eventType: "env_write", projectPath: b.project ?? "", payload: { key, created: result.created } });
+      return sendJson(res, 200, { file: result.file, created: result.created, backup: result.backup });
+    }
+    // Nicht-geheime Metadaten (warum/wie/was + Link) einer Variable speichern.
+    if (url.pathname === "/api/env-spec") {
+      const b = body as { project?: string; key?: string; why?: string; how?: string; what?: string; link?: string; source?: string };
+      const key = (b.key ?? "").trim();
+      if (!key) return sendJson(res, 400, { error: "key fehlt" });
+      const spec = store.upsertEnvSpec({
+        project: b.project ?? "", keyName: key, why: b.why, how: b.how, what: b.what, serviceLink: b.link, source: b.source ?? "manual",
+      });
+      store.recordEnvHistory({ project: b.project ?? "", keyName: key, change: "spec_edited" });
+      return sendJson(res, 200, { spec });
+    }
+    // Ein-Klick-Fix: .env (+ lokale Backups) in die .gitignore aufnehmen.
+    if (url.pathname === "/api/env-gitignore") {
+      const project = (body as { project?: string }).project ?? "";
+      const target = resolveEnvTarget(store, project);
+      if (!target) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
+      const result = addEnvToGitignore(resolve(target, "..")); // <root>/.env -> <root>
+      store.recordEvent({ eventType: "env_gitignore", projectPath: project, payload: { added: result.added } });
+      return sendJson(res, 200, result);
+    }
+    // Haiku-"Anforderungen": Code-Scan (deterministisch, serverseitig) + optional
+    // ein genannter Dienst -> annotierte Variablen als JSON. Teilt den
+    // Single-Flight-Guard der übrigen LLM-Läufe. FLÜCHTIG: nichts wird persistiert.
+    if (url.pathname === "/api/env-assist") {
+      const b = body as { project?: string; service?: string };
+      const target = resolveEnvTarget(store, b.project ?? "");
+      if (!target) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
+      const detectedKeys = scanEnvKeys(resolve(target, ".."));
+      const prefs = parseAssistPrefs(body as { persona?: string; lang?: string });
+      if (assistBusy) return sendJson(res, 429, { error: "Ein KI-Lauf ist bereits aktiv — kurz warten." });
+      assistBusy = true;
+      try {
+        const result = await runEnvAssist({
+          detectedKeys, service: b.service, ...prefs, claudeCmd: webOpts.assistCmd, timeoutMs: webOpts.assistTimeoutMs,
+        });
+        store.recordEvent({ eventType: "env_assist", projectPath: b.project ?? "", payload: { keys: detectedKeys.length, ok: result.ok } });
+        if (!result.ok) return sendJson(res, 502, { error: result.error });
+        return sendJson(res, 200, { text: result.text, detectedKeys });
       } finally {
         assistBusy = false;
       }

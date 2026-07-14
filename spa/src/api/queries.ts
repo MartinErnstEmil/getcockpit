@@ -7,6 +7,10 @@ import type {
   ConfigEntry,
   DecisionComment,
   DecisionEntry,
+  EnvAssistResponse,
+  EnvHistoryEntry,
+  EnvProjectView,
+  EnvSpecMeta,
   FileView,
   GitGraphResponse,
   GitLogResponse,
@@ -265,6 +269,77 @@ export function useWriteFile() {
       void qc.invalidateQueries({ queryKey: ["file"] });
       void qc.invalidateQueries({ queryKey: ["config"] });
     },
+  });
+}
+
+// --- Env-Tab -----------------------------------------------------------------
+// Wie useConfig: bei Einzelauswahl serverseitig gefiltert, sonst alle Projekte.
+// SICHERHEIT: die Antwort trägt nie einen Wert (nur Namen + gesetzt/leer).
+export function useEnv(scope: Scope) {
+  const project = scope.mode === "single" ? scope.project : "";
+  return useQuery({
+    queryKey: ["env", project],
+    queryFn: () =>
+      apiFetch<{ projects: EnvProjectView[] }>(
+        `/api/env${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+      ),
+  });
+}
+
+// Änderungs-Protokoll (Audit, ohne Werte) — erst bei aufgeklappter Historie.
+export function useEnvHistory(project: string, key: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["env-history", project, key ?? ""],
+    enabled,
+    queryFn: () =>
+      apiFetch<{ history: EnvHistoryEntry[] }>(
+        `/api/env-history?project=${encodeURIComponent(project)}${key ? `&key=${encodeURIComponent(key)}` : ""}`,
+      ),
+  });
+}
+
+// Wert write-only in die echte .env schreiben. Nach Erfolg env + Historie neu
+// laden (der Wert selbst kehrt nie zurück — nur present/hasValue ändern sich).
+export function useWriteEnvVar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { project: string; key: string; value: string }) =>
+      apiPost<{ file: string; created: boolean; backup: string | null }>("/api/env-write", v),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["env"] });
+      void qc.invalidateQueries({ queryKey: ["env-history"] });
+    },
+  });
+}
+
+// Nicht-geheime Metadaten (warum/wie/was + Link) speichern.
+export function useSaveEnvSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { project: string; key: string; why?: string; how?: string; what?: string; link?: string; source?: string }) =>
+      apiPost<{ spec: EnvSpecMeta }>("/api/env-spec", v),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["env"] });
+      void qc.invalidateQueries({ queryKey: ["env-history"] });
+    },
+  });
+}
+
+// Ein-Klick-Fix: .env (+ Backups) in die .gitignore aufnehmen.
+export function useEnvGitignore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { project: string }) => apiPost<{ added: string[]; file: string }>("/api/env-gitignore", v),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["env"] }),
+  });
+}
+
+// Haiku-"Anforderungen": Scan + optional genannter Dienst -> annotierte Variablen
+// (roher JSON-Text; die Seite parst ihn defensiv). persona/lang wie useAssist.
+export function useEnvAssist() {
+  return useMutation({
+    mutationFn: (v: { project: string; service?: string }) =>
+      apiPost<EnvAssistResponse>("/api/env-assist", { ...v, persona: getExpertLevel(), lang: getLocale() }),
   });
 }
 
