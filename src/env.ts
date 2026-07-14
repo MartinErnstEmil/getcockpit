@@ -8,9 +8,9 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, join, resolve } from "node:path";
+import { extname, join } from "node:path";
 import { normalizeProjectPath } from "./paths.js";
-import type { Store } from "./store.js";
+import type { EnvSpec, Store } from "./store.js";
 
 // Gültiger Variablenname (POSIX-nah): Buchstabe/Unterstrich, dann Wort-Zeichen.
 const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -53,11 +53,27 @@ export type EnvWriteResult =
 // bekanntes, erfasstes Projekt sein (DISTINCT project_path aus turns) — sonst
 // null. Der Basename ist fest ".env", es kann also nur die jeweils eigene
 // Umgebungsdatei getroffen werden.
-export function resolveEnvTarget(store: Store, project: string | undefined): string | null {
-  if (!project) return join(homedir(), ".claude", ".env");
+// Wurzelverzeichnis, in dem die .env eines Projekts liegt ('' = global ->
+// ~/.claude). Das ist die natürliche Einheit: .env, .env.example, .env-backups/
+// und der Scan hängen alle daran; die Dateipfade sind davon abgeleitet.
+function envRoot(projectPath: string): string {
+  return projectPath || join(homedir(), ".claude");
+}
+
+// Wie envRoot, aber VALIDIEREND für Client-Eingaben: ein nicht-globales Projekt
+// muss erfasst sein (DISTINCT project_path aus turns) — sonst null. Der Client
+// schickt nur einen Selektor, nie einen Rohpfad.
+export function resolveEnvProjectRoot(store: Store, project: string | undefined): string | null {
+  if (!project) return envRoot("");
   const norm = normalizeProjectPath(project);
   const known = store.rawDb().prepare("SELECT 1 FROM turns WHERE project_path = ? LIMIT 1").get(norm);
-  return known ? join(norm, ".env") : null;
+  return known ? envRoot(norm) : null;
+}
+
+// Die .env-Datei des Projekts (fester Basename) — abgeleitet aus der Wurzel.
+export function resolveEnvTarget(store: Store, project: string | undefined): string | null {
+  const root = resolveEnvProjectRoot(store, project);
+  return root ? join(root, ".env") : null;
 }
 
 function knownProjects(store: Store, filter?: string): string[] {
@@ -107,17 +123,14 @@ export function readEnvKeys(file: string): ParsedLine[] {
 // --- .gitignore-Status + Ein-Klick-Fix --------------------------------------
 
 export function gitignoreStatus(root: string): { isRepo: boolean; ignored: boolean } {
-  const git = (args: string[]): boolean => {
-    try {
-      execFileSync("git", args, { cwd: root, timeout: 3000, stdio: ["ignore", "ignore", "ignore"] });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (!git(["rev-parse", "--is-inside-work-tree"])) return { isRepo: false, ignored: false };
-  // check-ignore beendet mit 0, wenn der Pfad ignoriert wird, sonst 1 (wirft).
-  return { isRepo: true, ignored: git(["check-ignore", "-q", "--", ".env"]) };
+  // EIN git-Spawn statt zwei: check-ignore beendet mit 0 (ignoriert), 1 (im Repo,
+  // nicht ignoriert) oder 128 (kein Repo). Der Exit-Code trägt beide Signale.
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", ".env"], { cwd: root, timeout: 3000, stdio: ["ignore", "ignore", "ignore"] });
+    return { isRepo: true, ignored: true }; // Exit 0
+  } catch (err) {
+    return { isRepo: (err as { status?: number }).status === 1, ignored: false };
+  }
 }
 
 const GITIGNORE_LINES = [".env", ".env-backups/"];
@@ -182,9 +195,9 @@ export function writeEnvVar(store: Store, project: string, key: string, value: s
   }
   if (value.length > MAX_VALUE_LEN) return { ok: false, status: 413, error: "Wert zu lang (max. 8 KB)." };
   if (/[\r\n\0]/.test(value)) return { ok: false, status: 400, error: "Wert darf keine Zeilenumbrüche enthalten." };
-  const target = resolveEnvTarget(store, project);
-  if (!target) return { ok: false, status: 400, error: "Unbekanntes Projekt." };
-  const dir = resolve(target, "..");
+  const dir = resolveEnvProjectRoot(store, project);
+  if (!dir) return { ok: false, status: 400, error: "Unbekanntes Projekt." };
+  const target = join(dir, ".env");
   const created = !existsSync(target);
   try {
     if (created) mkdirSync(dir, { recursive: true });
@@ -216,12 +229,12 @@ function mergeVars(
   }));
 }
 
-function projectView(store: Store, projectPath: string, label: string): EnvProjectView {
-  const envFile = projectPath ? join(projectPath, ".env") : join(homedir(), ".claude", ".env");
-  const exampleFile = projectPath ? join(projectPath, ".env.example") : join(homedir(), ".claude", ".env.example");
-  const root = projectPath || join(homedir(), ".claude");
+function projectView(projectPath: string, label: string, specList: EnvSpec[]): EnvProjectView {
+  const root = envRoot(projectPath);
+  const envFile = join(root, ".env");
+  const exampleFile = join(root, ".env.example");
   const specs = new Map(
-    store.listEnvSpecs(projectPath).map((s) => [s.keyName, { why: s.why, how: s.how, what: s.what, serviceLink: s.serviceLink, source: s.source }]),
+    specList.map((s) => [s.keyName, { why: s.why, how: s.how, what: s.what, serviceLink: s.serviceLink, source: s.source }]),
   );
   return {
     projectPath,
@@ -235,12 +248,19 @@ function projectView(store: Store, projectPath: string, label: string): EnvProje
 }
 
 // Alle Projekte (+ global vorneweg) mit ihrer .env-Ansicht, optional auf ein
-// Projekt gefiltert (wie configView). Scannt NICHT den Code — das macht der
-// [Scan]-Knopf über /api/env-assist gezielt.
+// Projekt gefiltert (wie configView). Die Metadaten kommen aus EINER Abfrage
+// (nach Projekt gebündelt), nicht je Projekt einzeln. Scannt NICHT den Code —
+// das macht der [Scan]-Knopf über /api/env-assist gezielt.
 export function envView(store: Store, opts: { project?: string } = {}): EnvProjectView[] {
+  const specsByProject = new Map<string, EnvSpec[]>();
+  for (const s of store.listEnvSpecs()) {
+    const bucket = specsByProject.get(s.projectPath);
+    if (bucket) bucket.push(s);
+    else specsByProject.set(s.projectPath, [s]);
+  }
   const views: EnvProjectView[] = [];
-  if (!opts.project) views.push(projectView(store, "", "Global (~/.claude/.env)"));
-  for (const p of knownProjects(store, opts.project)) views.push(projectView(store, p, p));
+  if (!opts.project) views.push(projectView("", "Global (~/.claude/.env)", specsByProject.get("") ?? []));
+  for (const p of knownProjects(store, opts.project)) views.push(projectView(p, p, specsByProject.get(p) ?? []));
   return views;
 }
 

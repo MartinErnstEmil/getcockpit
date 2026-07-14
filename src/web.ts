@@ -13,7 +13,7 @@ import { cockpitHome } from "./paths.js";
 import { ASSIST_KINDS, parseAssistPrefs, runAssist, runCiAssist, runEnvAssist, runGitAssist, type AssistKind } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
-import { addEnvToGitignore, envView, resolveEnvTarget, scanEnvKeys, writeEnvVar } from "./env.js";
+import { addEnvToGitignore, envView, resolveEnvProjectRoot, scanEnvKeys, writeEnvVar } from "./env.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
 import { runDeliverySelftest } from "./selftest.js";
@@ -787,9 +787,9 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Ein-Klick-Fix: .env (+ lokale Backups) in die .gitignore aufnehmen.
     if (url.pathname === "/api/env-gitignore") {
       const project = (body as { project?: string }).project ?? "";
-      const target = resolveEnvTarget(store, project);
-      if (!target) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
-      const result = addEnvToGitignore(resolve(target, "..")); // <root>/.env -> <root>
+      const root = resolveEnvProjectRoot(store, project);
+      if (!root) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
+      const result = addEnvToGitignore(root);
       store.recordEvent({ eventType: "env_gitignore", projectPath: project, payload: { added: result.added } });
       return sendJson(res, 200, result);
     }
@@ -798,9 +798,9 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Single-Flight-Guard der übrigen LLM-Läufe. FLÜCHTIG: nichts wird persistiert.
     if (url.pathname === "/api/env-assist") {
       const b = body as { project?: string; service?: string };
-      const target = resolveEnvTarget(store, b.project ?? "");
-      if (!target) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
-      const detectedKeys = scanEnvKeys(resolve(target, ".."));
+      const root = resolveEnvProjectRoot(store, b.project ?? "");
+      if (!root) return sendJson(res, 400, { error: "Unbekanntes Projekt." });
+      const detectedKeys = scanEnvKeys(root);
       const prefs = parseAssistPrefs(body as { persona?: string; lang?: string });
       if (assistBusy) return sendJson(res, 429, { error: "Ein KI-Lauf ist bereits aktiv — kurz warten." });
       assistBusy = true;

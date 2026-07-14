@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { ChevronLeft, ChevronRight, Eye, EyeOff, HelpCircle } from "lucide-react";
 import { useScope } from "@/lib/useScope";
 import {
@@ -21,18 +21,17 @@ import type { EnvProjectView, EnvRequirement, EnvVarView } from "@/api/types";
 export default function EnvPage() {
   const { scope } = useScope();
   const q = useEnv(scope);
-  const [idx, setIdx] = useState(0);
+  const [rawIdx, setIdx] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
-
-  const projects = useMemo(() => q.data?.projects ?? [], [q.data]);
-  // Auswahlwechsel (Scope) ändert die Projektliste — Stepper-Index einklammern.
-  useEffect(() => {
-    if (idx > projects.length - 1) setIdx(Math.max(0, projects.length - 1));
-  }, [projects.length, idx]);
 
   if (q.error) return <div className="p-5"><ErrorBox error={q.error} onRetry={() => void q.refetch()} /></div>;
   if (q.isLoading) return <EmptyState title="Lädt…" />;
 
+  const projects = q.data?.projects ?? [];
+  // Auswahlwechsel (Scope) kann die Liste verkürzen — Index beim Rendern
+  // einklammern (kein Effekt/Extra-Render nötig); die Blätter-Knöpfe rechnen
+  // vom geklammerten Wert weiter, damit er nach dem Schrumpfen nicht driftet.
+  const idx = Math.min(rawIdx, Math.max(0, projects.length - 1));
   const current = projects[idx];
   return (
     <div className="mx-auto max-w-[1120px] px-5 py-5">
@@ -56,7 +55,7 @@ export default function EnvPage() {
         <p className="italic text-ink-2">Keine Projekte in dieser Auswahl.</p>
       ) : (
         <>
-          <Stepper idx={idx} total={projects.length} label={current ? (current.projectPath ? shortName(current.projectPath) : "Global") : ""} onPrev={() => setIdx((i) => Math.max(0, i - 1))} onNext={() => setIdx((i) => Math.min(projects.length - 1, i + 1))} />
+          <Stepper idx={idx} total={projects.length} label={current ? (current.projectPath ? shortName(current.projectPath) : "Global") : ""} onPrev={() => setIdx(Math.max(0, idx - 1))} onNext={() => setIdx(Math.min(projects.length - 1, idx + 1))} />
           {current && <ProjectPanel key={current.projectPath} project={current} />}
         </>
       )}
@@ -266,7 +265,7 @@ function VarRow({ project, v }: { project: string; v: EnvVarView }) {
           {showHist ? "Verlauf schließen" : "Verlauf"}
         </button>
         {write.isError && <span className="text-crit">{errMsg(write.error)}</span>}
-        {write.isSuccess && !write.isPending && !value && <span className="text-ok">Gespeichert (write-only in die .env).</span>}
+        {write.isSuccess && !value && <span className="text-ok">Gespeichert (write-only in die .env).</span>}
       </div>
 
       {v.spec && !showMeta && (v.spec.why || v.spec.how || v.spec.what || v.spec.serviceLink) && (
