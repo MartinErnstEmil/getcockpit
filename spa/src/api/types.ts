@@ -283,21 +283,46 @@ export interface ConfigDiff {
   untracked: boolean;
 }
 
+export type ConfigKind = "claude-md" | "memory-md" | "settings";
+
 export interface ConfigEntry {
-  label: string;
   projectPath: string | null;
   file: string;
+  kind: ConfigKind;
+  editable: boolean;
   exists: boolean;
   chars: number;
-  budget: number;
-  remaining: number;
+  budget: number | null;
+  remaining: number | null;
+  historyCount: number;
+}
+
+// Detail einer Datei, lazy beim Aufklappen geholt: uncommitted-Git-Diff +
+// Snapshot-Historie (Metadaten). Hält den Overview-Call günstig (kein git-Spawn).
+export interface ConfigDetail {
   diff: ConfigDiff | null;
+  snapshots: ConfigSnapshotMeta[];
+}
+
+// Versionshistorie (v7): Snapshot-Metadaten (ohne Inhalt) und ein einzelner
+// Snapshot mit Inhalt + Vorgänger für die Diff-Anzeige.
+export interface ConfigSnapshotMeta {
+  id: number;
+  at: string;
+  chars: number;
+}
+
+export interface ConfigSnapshotDiff {
+  at: string;
+  content: string;
+  prevContent: string | null;
 }
 
 export interface FileView {
   file: string;
   content: string;
   truncated: boolean;
+  writable: boolean; // serverseitige Schreib-Policy (settings.json u. Ä. = false)
 }
 
 // --- Config-Baukasten (Spiegel von composer.ts) -----------------------------

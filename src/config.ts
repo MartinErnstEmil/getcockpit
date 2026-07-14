@@ -5,7 +5,8 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import type { Dirent } from "node:fs";
 import { cockpitHome, normalizeProjectPath } from "./paths.js";
 import type { Store } from "./store.js";
 
@@ -23,15 +24,55 @@ export interface ConfigDiff {
   untracked: boolean;
 }
 
+// Welche Config-Datei eine Zeile beschreibt. Steuert Anzeige (Dateiname/Icon),
+// Budget (nur CLAUDE.md) und Editierbarkeit.
+export type ConfigKind = "claude-md" | "memory-md" | "settings";
+
+// EINE Stelle, die einen Basenamen der vom Config-Tab gepflegten Art zuordnet
+// (sonst null). Sowohl fileSpecs (was gelistet wird) als auch der Editor-Save
+// (was einen Snapshot bekommt) fragen hier — statt die Zuordnung an mehreren
+// Stellen per eigenem Regex nachzubauen.
+export function configKindOf(file: string): ConfigKind | null {
+  const b = basename(file).toLowerCase();
+  if (b === "claude.md") return "claude-md";
+  if (b === "memory.md") return "memory-md";
+  if (b === "settings.json") return "settings";
+  return null;
+}
+
 export interface ConfigEntry {
-  label: string;
-  projectPath: string | null; // null = global (~/.claude/CLAUDE.md)
+  projectPath: string | null; // null = global (~/.claude)
   file: string;
+  kind: ConfigKind;
+  editable: boolean; // settings.json ist read-only (WRITE_DENY), MEMORY.md/CLAUDE.md editierbar
   exists: boolean;
   chars: number;
-  budget: number;
-  remaining: number; // negativ = über Budget
-  diff: ConfigDiff | null; // null = kein Diff ermittelbar
+  budget: number | null; // nur CLAUDE.md hat ein Zeichen-Budget
+  remaining: number | null; // negativ = über Budget; null wenn kein Budget
+  historyCount: number; // Anzahl gespeicherter Versions-Snapshots (v7)
+}
+
+// Der uncommitted-Git-Diff wird NICHT mehr eifrig in configView berechnet (das
+// spawnte je Datei ein synchrones `git` und blockierte den Loop bei vielen
+// Projekten). Er wird jetzt LAZY über /api/config-detail geholt, wenn eine Zeile
+// aufgeklappt wird. cwd = das Verzeichnis der Datei selbst (nicht der Projekt-
+// Selektor): so trifft der Diff auch MEMORY.md/globale Dateien korrekt bzw. liefert
+// sauber null, wenn dort kein Repo ist.
+export function configFileDiff(file: string): ConfigDiff | null {
+  return gitDiffLines(dirname(file), file);
+}
+
+// Ab dieser Inhaltsgröße wird KEIN Snapshot mehr in die DB geschrieben — hält
+// die Versionshistorie schlank (settings.json u. ä. können groß werden).
+const SNAPSHOT_MAX_CHARS = 256 * 1024;
+
+interface FileSpec {
+  projectPath: string | null;
+  file: string; // Absolutpfad (Original-Separatoren, für git-cwd)
+  kind: ConfigKind;
+  editable: boolean;
+  hasBudget: boolean;
+  onlyIfExists: boolean; // CLAUDE.md immer zeigen (Baukasten kann anlegen); Rest nur wenn vorhanden
 }
 
 function gitDiffLines(cwd: string, file: string): ConfigDiff | null {
@@ -53,45 +94,108 @@ function gitDiffLines(cwd: string, file: string): ConfigDiff | null {
   }
 }
 
-function entryFor(label: string, projectPath: string | null, file: string): ConfigEntry {
-  const budget = claudeMdBudget();
-  let chars = 0;
-  const exists = existsSync(file);
-  if (exists) {
-    try {
-      chars = readFileSync(file, "utf8").length;
-    } catch {
-      // unlesbar behandeln wie leer; exists bleibt true
-    }
+// Eine Datei EINMAL statten + lesen: ein statSync deckt Existenz UND is-file ab
+// (statt existsSync + statSync). Inhalt leer, wenn fehlend oder unlesbar.
+function readConfigFile(file: string): { exists: boolean; content: string } {
+  try {
+    if (!statSync(file).isFile()) return { exists: false, content: "" };
+  } catch {
+    return { exists: false, content: "" }; // fehlend
   }
-  const cwd = projectPath ?? join(homedir(), ".claude");
+  try {
+    return { exists: true, content: readFileSync(file, "utf8") };
+  } catch {
+    return { exists: true, content: "" }; // unlesbar behandeln wie leer
+  }
+}
+
+// Reine Ableitung einer Zeile aus Spec + gelesenem Inhalt — kein IO, kein Write.
+function buildEntry(spec: FileSpec, content: string, exists: boolean): ConfigEntry {
+  const budget = spec.hasBudget ? claudeMdBudget() : null;
   return {
-    label,
-    projectPath,
-    file: normalizeProjectPath(file),
+    projectPath: spec.projectPath,
+    file: normalizeProjectPath(spec.file),
+    kind: spec.kind,
+    editable: spec.editable,
     exists,
-    chars,
+    chars: content.length,
     budget,
-    remaining: budget - chars,
-    diff: exists ? gitDiffLines(cwd, file) : null,
+    remaining: budget != null ? budget - content.length : null,
+    historyCount: 0, // wird in configView per Sammel-Abfrage gefüllt
   };
 }
 
-// Alle bekannten Projekte = DISTINCT project_path aus turns (dieselbe Quelle
-// wie portfolioView) — optional auf ein Projekt gefiltert.
-export function configView(store: Store, opts: { project?: string } = {}): ConfigEntry[] {
-  const db = store.rawDb();
-  const filter = opts.project ? normalizeProjectPath(opts.project) : null;
-  const rows = db
-    .prepare("SELECT DISTINCT project_path FROM turns ORDER BY project_path")
-    .all() as Array<{ project_path: string }>;
-  const entries: ConfigEntry[] = [
-    entryFor("Global (~/.claude/CLAUDE.md)", null, join(homedir(), ".claude", "CLAUDE.md")),
-  ];
-  for (const r of rows) {
-    if (filter && r.project_path !== filter) continue;
-    entries.push(entryFor(r.project_path, r.project_path, join(r.project_path, "CLAUDE.md")));
+// ~/.claude/projects EINMAL scannen (die Verzeichnis-Einträge werden für JEDES
+// Projekt zur Slug-Auflösung gebraucht — vorher las jeder Aufruf das Verzeichnis
+// neu, also O(Projekte × Einträge) je Request). [] bei fehlendem Verzeichnis.
+function readProjectsDirents(): Dirent[] {
+  try {
+    return readdirSync(join(homedir(), ".claude", "projects"), { withFileTypes: true });
+  } catch {
+    return []; // kein projects-Verzeichnis (frische Installation) o. Ä.
   }
+}
+
+// Das Memory-Verzeichnis eines Projekts: ~/.claude/projects/<slug>/memory.
+// <slug> ist Claude Codes Encoding des Projektpfads (jedes Nicht-alphanumerische
+// Zeichen -> '-'). Der normalisierte Pfad verliert die Groß-/Kleinschreibung
+// (Laufwerksbuchstabe), darum ein case-insensitiver Verzeichnis-Match statt einer
+// naiven String-Ableitung. null = kein passendes Memory-Verzeichnis gefunden.
+function resolveMemoryDir(projectPath: string, dirents: Dirent[]): string | null {
+  const slug = normalizeProjectPath(projectPath).replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+  const projectsRoot = join(homedir(), ".claude", "projects");
+  const hit = dirents.find((e) => e.isDirectory() && e.name.toLowerCase() === slug);
+  return hit ? join(projectsRoot, hit.name, "memory") : null;
+}
+
+function claudeSpec(projectPath: string | null, file: string): FileSpec {
+  return { projectPath, file, kind: "claude-md", editable: true, hasBudget: true, onlyIfExists: false };
+}
+function memorySpec(projectPath: string | null, file: string): FileSpec {
+  return { projectPath, file, kind: "memory-md", editable: true, hasBudget: false, onlyIfExists: true };
+}
+function settingsSpec(projectPath: string | null, file: string): FileSpec {
+  return { projectPath, file, kind: "settings", editable: false, hasBudget: false, onlyIfExists: true };
+}
+
+// Die Datei-Spezifikationen je Sichtbereich, gruppiert: global (CLAUDE.md +
+// settings.json) vorneweg, dann je Projekt CLAUDE.md, MEMORY.md, settings.json.
+function fileSpecs(store: Store, opts: { project?: string }, dirents: Dirent[]): FileSpec[] {
+  const home = join(homedir(), ".claude");
+  const specs: FileSpec[] = [];
+  if (!opts.project) {
+    specs.push(claudeSpec(null, join(home, "CLAUDE.md")));
+    specs.push(settingsSpec(null, join(home, "settings.json")));
+  }
+  for (const p of store.distinctProjectPaths(opts.project)) {
+    specs.push(claudeSpec(p, join(p, "CLAUDE.md")));
+    const memDir = resolveMemoryDir(p, dirents);
+    if (memDir) specs.push(memorySpec(p, join(memDir, "MEMORY.md")));
+    specs.push(settingsSpec(p, join(p, ".claude", "settings.json")));
+  }
+  return specs;
+}
+
+// Flache Liste aller Config-Zeilen (die UI gruppiert nach projectPath). Günstig
+// gehalten: KEINE git-Spawns (Diffs sind lazy, siehe configFileDiff), das
+// projects-Verzeichnis wird einmal gescannt, die Snapshot-Zahlen kommen aus EINER
+// Sammel-Abfrage. Der Snapshot-Write ist ein EXPLIZITER Schritt hier (nicht in
+// einer "view"-Ableitung versteckt): pro vorhandener, nicht-riesiger Datei, sofern
+// sich der Inhalt seit dem letzten unterscheidet (Store macht die Hash-Dedup).
+export function configView(store: Store, opts: { project?: string } = {}): ConfigEntry[] {
+  const dirents = readProjectsDirents();
+  const entries: ConfigEntry[] = [];
+  for (const spec of fileSpecs(store, opts, dirents)) {
+    const { exists, content } = readConfigFile(spec.file);
+    if (!exists && spec.onlyIfExists) continue;
+    const entry = buildEntry(spec, content, exists);
+    if (exists && content.length > 0 && content.length <= SNAPSHOT_MAX_CHARS) {
+      store.recordConfigSnapshot({ projectPath: spec.projectPath, file: entry.file, content });
+    }
+    entries.push(entry);
+  }
+  const counts = store.countConfigSnapshotsByFiles(entries.filter((e) => e.exists).map((e) => e.file));
+  for (const e of entries) e.historyCount = counts.get(e.file) ?? 0;
   return entries;
 }
 
@@ -118,7 +222,9 @@ const DENY_BASENAME = /^\.env(\..*)?$|credential|secret|id_rsa|id_ed25519|\.pem$
 const MAX_FILE_BYTES = 512 * 1024;
 
 export type FileReadResult =
-  | { ok: true; file: string; content: string; truncated: boolean }
+  // writable spiegelt die serverseitige Schreib-Policy (WRITE_DENY_BASENAME) —
+  // EINZIGE Quelle; die SPA blendet den Editor danach ein, statt den Regex zu kopieren.
+  | { ok: true; file: string; content: string; truncated: boolean; writable: boolean }
   | { ok: false; status: number; error: string };
 
 // Gemeinsame, gehärtete Pfad-Auflösung für Lesen UND Schreiben: Allowlist-
@@ -212,6 +318,7 @@ export function readViewerFile(store: Store, rawPath: string, project?: string):
     file: normalizeProjectPath(target),
     content: buf.subarray(0, MAX_FILE_BYTES).toString("utf8"),
     truncated,
+    writable: !WRITE_DENY_BASENAME.test(base),
   };
 }
 
@@ -258,7 +365,17 @@ export function writeViewerFile(
     // darf das vom Nutzer ausdrücklich gewollte Speichern nicht blockieren.
   }
   writeFileSync(target, content, "utf8");
-  return { ok: true, file: normalizeProjectPath(target), content, truncated: false };
+  const norm = normalizeProjectPath(target);
+  // Editor-Saves als eigenen Snapshot festhalten (sonst wäre die im Editor
+  // geänderte Zwischenversion erst beim nächsten Tab-Öffnen — oder nie — in der
+  // Historie). Nur für die editierbaren Config-Arten (settings.json ist oben schon
+  // 403 geblockt) — dieselbe Taxonomie wie fileSpecs (configKindOf), kein eigener
+  // Regex. project ist ein Selektor ('' = global); den Datei-Pfad trägt norm.
+  const kind = configKindOf(target);
+  if (kind === "claude-md" || kind === "memory-md") {
+    store.recordConfigSnapshot({ projectPath: project ?? null, file: norm, content });
+  }
+  return { ok: true, file: norm, content, truncated: false, writable: true };
 }
 
 // Begrenzte Basename-Suche unter einer Allowlist-Wurzel: liefert den Pfad nur

@@ -60,7 +60,7 @@ export default function OverviewPage() {
 
   const recs = buildRecommendations(t, {
     fullConfigs: (configQ.data?.entries ?? []).filter(
-      (e) => e.exists && keep(e.projectPath || null) && e.remaining < e.budget * 0.1,
+      (e) => e.exists && e.budget != null && e.remaining != null && keep(e.projectPath || null) && e.remaining < e.budget * 0.1,
     ),
     // done-mit-Antwort ist eine getroffene Entscheidung, kein Entwurf —
     // dieselbe Semantik wie decisionsView (PO 12.07., i-e2fcaaa932).

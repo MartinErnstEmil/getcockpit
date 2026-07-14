@@ -347,6 +347,23 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     PRIMARY KEY (item_uuid, session_id)
   );
   `,
+  // v7 (Gedächtnis & Regeln, Versionshistorie): Snapshots der Config-Dateien
+  // (CLAUDE.md / MEMORY.md / settings.json). Kein Git nötig — deckt auch die
+  // meist nicht getrackten ~/.claude- und Memory-Dateien ab. Capture-on-read
+  // mit Hash-Dedup (nur bei Änderung ein neuer Snapshot). project_path = ''
+  // bedeutet global; file ist der normalisierte Absolutpfad (Gruppierungs-Key).
+  `
+  CREATE TABLE config_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL DEFAULT '',
+    file TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    content TEXT NOT NULL,
+    chars INTEGER NOT NULL,
+    at TEXT NOT NULL
+  );
+  CREATE INDEX config_snapshots_file ON config_snapshots(file, id);
+  `,
 ];
 
 // Geteilt zwischen Store (better-sqlite3) und Hook-Bundle (node:sqlite): Upsert

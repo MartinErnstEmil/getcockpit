@@ -76,15 +76,6 @@ export function resolveEnvTarget(store: Store, project: string | undefined): str
   return root ? join(root, ".env") : null;
 }
 
-function knownProjects(store: Store, filter?: string): string[] {
-  const rows = store
-    .rawDb()
-    .prepare("SELECT DISTINCT project_path FROM turns ORDER BY project_path")
-    .all() as Array<{ project_path: string }>;
-  const norm = filter ? normalizeProjectPath(filter) : null;
-  return rows.map((r) => r.project_path).filter((p) => !norm || p === norm);
-}
-
 // --- .env lesen (nur NAMEN, nie Werte) --------------------------------------
 
 interface ParsedLine {
@@ -260,7 +251,7 @@ export function envView(store: Store, opts: { project?: string } = {}): EnvProje
   }
   const views: EnvProjectView[] = [];
   if (!opts.project) views.push(projectView("", "Global (~/.claude/.env)", specsByProject.get("") ?? []));
-  for (const p of knownProjects(store, opts.project)) views.push(projectView(p, p, specsByProject.get(p) ?? []));
+  for (const p of store.distinctProjectPaths(opts.project)) views.push(projectView(p, p, specsByProject.get(p) ?? []));
   return views;
 }
 

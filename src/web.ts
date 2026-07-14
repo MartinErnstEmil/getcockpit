@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { cockpitHome } from "./paths.js";
 import { ASSIST_KINDS, parseAssistPrefs, runAssist, runCiAssist, runEnvAssist, runGitAssist, type AssistKind } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
-import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
+import { configFileDiff, configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { addEnvToGitignore, envView, resolveEnvProjectRoot, scanEnvKeys, writeEnvVar } from "./env.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
@@ -439,6 +439,23 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       });
       return sendJson(res, 200, { entries });
     }
+    // Gedächtnis & Regeln — Detail einer Datei, LAZY beim Aufklappen einer Zeile
+    // geholt (hält /api/config günstig): der uncommitted-Git-Diff (ein git-Spawn,
+    // nur hier statt für jede Datei bei jedem Overview-Load) UND die Snapshot-
+    // Metadaten (neueste zuerst, ohne Inhalt). file = normalisierter Absolutpfad.
+    if (req.method === "GET" && url.pathname === "/api/config-detail") {
+      const file = url.searchParams.get("file") ?? "";
+      if (!file) return sendJson(res, 400, { error: "file fehlt" });
+      return sendJson(res, 200, { diff: configFileDiff(file), snapshots: store.listConfigSnapshots(file) });
+    }
+    // Ein Snapshot mit vollem Inhalt + dem des Vorgängers (für die Diff-Anzeige).
+    if (req.method === "GET" && url.pathname === "/api/config-snapshot") {
+      const id = Number(url.searchParams.get("id"));
+      if (!Number.isInteger(id) || id <= 0) return sendJson(res, 400, { error: "ungültige id" });
+      const snap = store.getConfigSnapshotDiff(id);
+      if (!snap) return sendJson(res, 404, { error: "Snapshot nicht gefunden" });
+      return sendJson(res, 200, snap);
+    }
     // Env-Tab: .env je Projekt (+ global). SICHERHEIT: liefert NUR Namen +
     // gesetzt/leer und die nicht-geheimen Metadaten — nie einen Wert (env.ts).
     if (req.method === "GET" && url.pathname === "/api/env") {
@@ -465,7 +482,7 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       if (!p) return sendJson(res, 400, { error: "path fehlt" });
       const r = readViewerFile(store, p, url.searchParams.get("project") ?? undefined);
       if (!r.ok) return sendJson(res, r.status, { error: r.error });
-      return sendJson(res, 200, { file: r.file, content: r.content, truncated: r.truncated });
+      return sendJson(res, 200, { file: r.file, content: r.content, truncated: r.truncated, writable: r.writable });
     }
     if (req.method === "POST") return handlePost(req, res, url, port);
     return sendJson(res, 404, { error: "not found" });

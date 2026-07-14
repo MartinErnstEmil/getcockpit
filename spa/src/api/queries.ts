@@ -5,7 +5,9 @@ import type {
   AssistKind,
   BudgetCheckResult,
   ComposerApplyResult,
+  ConfigDetail,
   ConfigEntry,
+  ConfigSnapshotDiff,
   DecisionComment,
   DecisionEntry,
   EnvAssistResponse,
@@ -235,6 +237,25 @@ export function useConfig(scope: Scope) {
       apiFetch<{ entries: ConfigEntry[] }>(
         `/api/config${project ? `?project=${encodeURIComponent(project)}` : ""}`,
       ),
+  });
+}
+
+// Detail einer Config-Datei (uncommitted-Diff + Snapshot-Historie), LAZY beim
+// Aufklappen einer Zeile geholt. `file` ist der Absolutpfad aus der ConfigEntry.
+export function useConfigDetail(file: string | null) {
+  return useQuery({
+    queryKey: ["config-detail", file],
+    enabled: file !== null,
+    queryFn: () => apiFetch<ConfigDetail>(`/api/config-detail?file=${encodeURIComponent(file ?? "")}`),
+  });
+}
+
+// Ein einzelner Snapshot mit Inhalt + Vorgänger (für die Diff-Anzeige).
+export function useConfigSnapshot(id: number | null) {
+  return useQuery({
+    queryKey: ["config-snapshot", id],
+    enabled: id !== null,
+    queryFn: () => apiFetch<ConfigSnapshotDiff>(`/api/config-snapshot?id=${id ?? 0}`),
   });
 }
 

@@ -3,6 +3,7 @@
 // (c) 2026, relizenziert durch denselben Rechteinhaber) — ohne escalated_*,
 // order_index, Composer-/Statement-Tabellen (ADR-004).
 import type { Database, Statement } from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { openDb } from "./db.js";
 import { newId, nowIso } from "./ids.js";
 import { normalizeProjectPath, resolveDbPath } from "./paths.js";
@@ -85,6 +86,15 @@ export interface EnvHistoryEntry {
   change: string;
   detail: string;
   at: string;
+}
+
+// Gedächtnis & Regeln (v7): ein Snapshot einer Config-Datei. Metadaten-Liste
+// trägt KEINEN Inhalt (Payload klein halten); getConfigSnapshotDiff liefert den
+// vollen Inhalt plus den des Vorgängers für die Diff-Anzeige.
+export interface ConfigSnapshotMeta {
+  id: number;
+  at: string;
+  chars: number;
 }
 
 // Zustell-Protokoll (answer_acked, v2): Weg + Session + Zeitpunkt der ersten
@@ -975,6 +985,94 @@ export class Store {
       detail: r.detail,
       at: r.at,
     }));
+  }
+
+  // --- Config-Snapshots (v7, Versionshistorie) ------------------------------
+
+  // Höchstzahl aufbewahrter Snapshots je Datei — Ältere werden nach jedem
+  // Insert gekappt (Historie tief genug, DB beschränkt).
+  static readonly CONFIG_SNAPSHOT_KEEP = 200;
+
+  // Einen Snapshot festhalten — aber NUR wenn sich der Inhalt seit dem letzten
+  // unterscheidet (Hash-Dedup). So bläht das Öffnen des Tabs die Historie nicht
+  // auf. Rückgabe true = neuer Snapshot geschrieben. file ist der normalisierte
+  // Absolutpfad (Gruppierungs-Key), project '' = global.
+  // SICHERHEIT: der Inhalt wird VOR dem Persistieren redigiert (wie turns/items,
+  // Auflage redact.ts) — settings.json u. Ä. können Tokens tragen, die sonst roh
+  // und dauerhaft in der DB landeten.
+  // EFFIZIENZ: die Dedup-Prüfung rechnet auf dem ROH-Hash und läuft VOR der
+  // Redaction. configView ruft dies bei jedem Tab-/Overview-Load für jede Datei;
+  // im Normalfall (unveränderter Inhalt) sparen wir so die Regex-/Entropie-Pässe.
+  // sha ist rein intern (nie über die API zurückgegeben) — Roh- statt Redigiert-
+  // Hash ist unbedenklich. Redaction deterministisch: roh-gleich => redigiert-gleich.
+  recordConfigSnapshot(e: { projectPath: string | null; file: string; content: string }): boolean {
+    const sha = createHash("sha256").update(e.content).digest("hex");
+    const last = this.prep("SELECT sha FROM config_snapshots WHERE file = ? ORDER BY id DESC LIMIT 1").get(e.file) as
+      | { sha: string }
+      | undefined;
+    if (last && last.sha === sha) return false;
+    const content = redactText(e.content).text;
+    this.prep(
+      "INSERT INTO config_snapshots (project_path, file, sha, content, chars, at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(e.projectPath ?? "", e.file, sha, content, content.length, nowIso());
+    // Retention: alles jenseits der neuesten KEEP für diese Datei löschen.
+    this.prep(
+      `DELETE FROM config_snapshots WHERE file = ? AND id NOT IN (
+         SELECT id FROM config_snapshots WHERE file = ? ORDER BY id DESC LIMIT ?
+       )`,
+    ).run(e.file, e.file, Store.CONFIG_SNAPSHOT_KEEP);
+    return true;
+  }
+
+  countConfigSnapshots(file: string): number {
+    const row = this.prep("SELECT COUNT(*) AS n FROM config_snapshots WHERE file = ?").get(file) as { n: number };
+    return row.n;
+  }
+
+  // Snapshot-Anzahl für mehrere Dateien in EINER Abfrage (configView vermeidet so
+  // ein COUNT je Datei). Fehlende Dateien fehlen in der Map (Aufrufer defaultet 0).
+  countConfigSnapshotsByFiles(files: string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    if (files.length === 0) return out;
+    const placeholders = files.map(() => "?").join(", ");
+    const rows = this.prep(
+      `SELECT file, COUNT(*) AS n FROM config_snapshots WHERE file IN (${placeholders}) GROUP BY file`,
+    ).all(...files) as Array<{ file: string; n: number }>;
+    for (const r of rows) out.set(r.file, r.n);
+    return out;
+  }
+
+  // Erfasste Projekte = DISTINCT project_path aus turns (dieselbe Quelle wie
+  // portfolioView), optional auf ein Projekt gefiltert. Geteilt von config.ts UND
+  // env.ts (vorher zweimal als lokale knownProjects dupliziert).
+  distinctProjectPaths(filter?: string): string[] {
+    const rows = this.prep("SELECT DISTINCT project_path FROM turns ORDER BY project_path").all() as Array<{
+      project_path: string;
+    }>;
+    const norm = filter ? normalizeProjectPath(filter) : null;
+    return rows.map((r) => r.project_path).filter((p) => !norm || p === norm);
+  }
+
+  // Metadaten-Liste (ohne Inhalt), neueste zuerst.
+  listConfigSnapshots(file: string, limit = 200): ConfigSnapshotMeta[] {
+    const rows = this.prep(
+      "SELECT id, at, chars FROM config_snapshots WHERE file = ? ORDER BY id DESC LIMIT ?",
+    ).all(file, limit) as Array<{ id: number; at: string; chars: number }>;
+    return rows.map((r) => ({ id: r.id, at: r.at, chars: r.chars }));
+  }
+
+  // Voller Inhalt eines Snapshots plus der des chronologischen Vorgängers
+  // (derselben Datei) — die UI stellt daraus den Diff dar. prevContent = null
+  // beim allerersten Snapshot.
+  getConfigSnapshotDiff(id: number): { at: string; content: string; prevContent: string | null } | null {
+    const cur = this.prep("SELECT file, content, at FROM config_snapshots WHERE id = ?").get(id) as
+      | { file: string; content: string; at: string }
+      | undefined;
+    if (!cur) return null;
+    const prev = this.prep(
+      "SELECT content FROM config_snapshots WHERE file = ? AND id < ? ORDER BY id DESC LIMIT 1",
+    ).get(cur.file, id) as { content: string } | undefined;
+    return { at: cur.at, content: cur.content, prevContent: prev?.content ?? null };
   }
 
   // Archivierte Projektpfade — für den Archiv-Ausschluss in den zählenden Views.
