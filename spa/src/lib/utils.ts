@@ -20,6 +20,14 @@ const AGE_WORDS: Record<Locale, { today: string; yesterday: string; days: (n: nu
   fr: { today: "aujourd’hui", yesterday: "depuis hier", days: (n) => `il y a ${n} jours` },
 };
 
+// Fehlertext aus einem unbekannten Fehlerwert (react-query mutation.error o.ä.);
+// null = kein Fehler. Für Inline-Fehler neben Buttons — die rote ErrorBox nutzt
+// ihre eigene, ApiError-bewusste Variante (StateView).
+export function errText(e: unknown): string | null {
+  if (!e) return null;
+  return e instanceof Error ? e.message : String(e);
+}
+
 // Letzter Pfadbestandteil als Projektname (Onepager shortName).
 export function shortName(p: string | null | undefined): string {
   if (!p) return "global";

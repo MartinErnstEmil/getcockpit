@@ -5,7 +5,7 @@ import { useGitStates, useGitRefresh, useGitLog, useGitGraph, useGitAssist, useS
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
 import GitGraph from "@/components/GitGraph";
-import { ageText, cn, shortName } from "@/lib/utils";
+import { ageText, cn, errText, shortName } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { gitAdvisoryVisible } from "@/lib/gitmode";
 import { deriveGitActions, type GitAction } from "@/lib/gitactions";
@@ -117,11 +117,6 @@ function CommandChip({ command }: { command: string }) {
   );
 }
 
-function errMsg(e: unknown): string | null {
-  if (!e) return null;
-  return e instanceof Error ? e.message : String(e);
-}
-
 // Gemeinsame Ausgabe eines Assist-Laufs (Git wie CI): Fehler-Box bzw.
 // Erklärung + Handlungsoptionen aus dem triage-Vertrag. Ein Codepfad für beide.
 function TriageOutput({ out, error }: { out: { text: string } | null; error: string | null }) {
@@ -154,7 +149,7 @@ function GitCard({ s }: { s: GitStateRow }) {
 
   const live = refresh.data ?? null;
   const refreshing = refresh.isPending;
-  const rowError = errMsg(refresh.error);
+  const rowError = errText(refresh.error);
   const doRefresh = () => refresh.mutate({ project: s.projectPath });
 
   // Beim ersten Aufklappen automatisch live lesen — die Handlungsempfehlungen
@@ -266,8 +261,6 @@ function GitActions({ actions, project }: { actions: GitAction[]; project: strin
 function GitAssist({ project }: { project: string }) {
   // Ergebnis/Fehler kommen direkt aus der Mutation (react-query resettet beide
   // beim nächsten mutate) — kein gespiegelter useState nötig.
-  // Ergebnis/Fehler kommen direkt aus der Mutation (react-query resettet beide
-  // beim nächsten mutate) — kein gespiegelter useState nötig.
   const assist = useGitAssist();
   return (
     <div className="pt-0.5">
@@ -281,7 +274,7 @@ function GitAssist({ project }: { project: string }) {
         <Sparkles className={cn("h-3.5 w-3.5", assist.isPending && "animate-pulse")} />
         {assist.isPending ? "Denkt nach…" : "Was jetzt?"}
       </button>
-      <TriageOutput out={assist.data ?? null} error={errMsg(assist.error)} />
+      <TriageOutput out={assist.data ?? null} error={errText(assist.error)} />
     </div>
   );
 }
@@ -560,7 +553,7 @@ function CiAssist({ project, status }: { project: string; status: CiStatus }) {
         <Sparkles className={cn("h-3.5 w-3.5", assist.isPending && "animate-pulse")} />
         {assist.isPending ? "Liest den Log…" : "Woran liegt's?"}
       </button>
-      <TriageOutput out={assist.data ?? null} error={errMsg(assist.error)} />
+      <TriageOutput out={assist.data ?? null} error={errText(assist.error)} />
     </div>
   );
 }

@@ -11,7 +11,7 @@ import {
 } from "@/api/queries";
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
-import { shortName } from "@/lib/utils";
+import { errText, shortName } from "@/lib/utils";
 import type { EnvProjectView, EnvRequirement, EnvVarView } from "@/api/types";
 
 // /env — Umgebungsvariablen je Projekt (+ global) verwalten. SICHERHEIT: die
@@ -147,7 +147,7 @@ function GitignoreRow({ project }: { project: EnvProjectView }) {
       <button type="button" disabled={fix.isPending} onClick={() => fix.mutate({ project: project.projectPath })} className="ds-btn-primary ml-auto !py-1 !px-3">
         {fix.isPending ? "Ergänzt…" : ".env in .gitignore aufnehmen"}
       </button>
-      {fix.isError && <span className="w-full text-crit">{errMsg(fix.error)} — erneut versuchen.</span>}
+      {fix.isError && <span className="w-full text-crit">{errText(fix.error)} — erneut versuchen.</span>}
     </div>
   );
 }
@@ -187,7 +187,7 @@ function ScanPanel({ project }: { project: EnvProjectView }) {
           vorschlagen
         </button>
       </div>
-      {assist.isError && <p className="mt-2 text-xs text-crit">{errMsg(assist.error)}</p>}
+      {assist.isError && <p className="mt-2 text-xs text-crit">{errText(assist.error)}</p>}
       {rawFallback && (
         <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap border border-line bg-panel p-2 text-xs text-ink-2">{rawFallback}</pre>
       )}
@@ -264,7 +264,7 @@ function VarRow({ project, v }: { project: string; v: EnvVarView }) {
         <button type="button" onClick={() => setShowHist((s) => !s)} className="text-ink-2 underline decoration-dotted">
           {showHist ? "Verlauf schließen" : "Verlauf"}
         </button>
-        {write.isError && <span className="text-crit">{errMsg(write.error)}</span>}
+        {write.isError && <span className="text-crit">{errText(write.error)}</span>}
         {write.isSuccess && !value && <span className="text-ok">Gespeichert (write-only in die .env).</span>}
       </div>
 
@@ -314,7 +314,7 @@ function SpecEditor({ project, varKey, spec, onDone }: { project: string; varKey
           {save.isPending ? "Speichert…" : "Speichern"}
         </button>
         <button type="button" onClick={onDone} className="ds-btn-ghost border border-line !px-3">Abbrechen</button>
-        {save.isError && <span className="text-crit">{errMsg(save.error)}</span>}
+        {save.isError && <span className="text-crit">{errText(save.error)}</span>}
       </div>
     </div>
   );
@@ -324,7 +324,7 @@ function SpecEditor({ project, varKey, spec, onDone }: { project: string; varKey
 function HistoryList({ project, varKey }: { project: string; varKey: string }) {
   const q = useEnvHistory(project, varKey, true);
   if (q.isLoading) return <div className="mt-2 text-xs text-ink-2">Lädt…</div>;
-  if (q.error) return <div className="mt-2 text-xs text-crit">{errMsg(q.error)}</div>;
+  if (q.error) return <div className="mt-2 text-xs text-crit">{errText(q.error)}</div>;
   const history = q.data?.history ?? [];
   if (history.length === 0) return <div className="mt-2 text-xs text-ink-2">Noch keine Änderungen protokolliert.</div>;
   return (
@@ -346,10 +346,6 @@ const CHANGE_LABEL: Record<string, string> = {
 };
 
 // --- Hilfsfunktionen ---------------------------------------------------------
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Fehler";
-}
 
 // Nur http/https zulassen — nie javascript:/data: aus (untrusted) Haiku-/DB-Text.
 function safeHref(url: string): string {
