@@ -415,3 +415,31 @@ export interface GitGraphResponse {
   // limit erreicht -> es gibt vermutlich ältere Commits außerhalb des Fensters.
   limitHit: boolean;
 }
+
+// Ship-Tab Slice 1: Roh-Signale aus dem Repo-Wurzel (Spiegel von shipinfo.ts).
+// Die Klassifikation in Ziel/Gate/Kommando passiert rein in lib/shipplan.ts.
+export interface ShipSignals {
+  files: string[];
+  npmScripts: string[];
+  deployWorkflow: boolean;
+}
+
+// Ship-Tab Slice 2/3: Live-CI-Status (Spiegel von ciinfo.ts CiStatus).
+export type CiState =
+  | "no-gh"
+  | "no-auth"
+  | "no-remote"
+  | "non-github"
+  | "unpushed"
+  | "no-run"
+  | "running"
+  | "passed"
+  | "failed";
+export interface CiStatus {
+  state: CiState;
+  headSha: string;
+  workflowName?: string;
+  url?: string;
+  runId?: number;
+  host?: string;
+}

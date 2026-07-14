@@ -10,14 +10,16 @@ import { createServer } from "node:http";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cockpitHome } from "./paths.js";
-import { ASSIST_KINDS, parseAssistPrefs, runAssist, runEnvAssist, runGitAssist, type AssistKind } from "./assist.js";
+import { ASSIST_KINDS, parseAssistPrefs, runAssist, runCiAssist, runEnvAssist, runGitAssist, type AssistKind } from "./assist.js";
 import { runBudgetCheck } from "./claudemd.js";
 import { configView, readViewerFile, resolveClaudeMdTarget, writeViewerFile } from "./config.js";
 import { addEnvToGitignore, envView, resolveEnvTarget, scanEnvKeys, writeEnvVar } from "./env.js";
 import { applySnippetsToFile, loadCatalog, resolveSnippetsByIds } from "./composer.js";
 import { runStatusBrief } from "./statusbrief.js";
 import { runDeliverySelftest } from "./selftest.js";
-import { collectAheadBehind, collectGitGraph, collectGitLog, collectGitState, collectLastSnapshot } from "./gitinfo.js";
+import { collectAheadBehind, collectGitGraph, collectGitLog, collectGitState, collectLastSnapshot, headShaOf } from "./gitinfo.js";
+import { collectShipSignals } from "./shipinfo.js";
+import { collectCiStatus, fetchFailedLog } from "./ciinfo.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
 import { applyLegacyRemoval, runSetup } from "./setup.js";
 import { setupPageHtml } from "./setuppage.js";
@@ -229,6 +231,29 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       .get(project, project);
   }
 
+  // Für die GET-Git/Ship-Endpunkte: `project`-Query lesen und validieren. Sendet
+  // im Fehlerfall selbst 400 und liefert null; sonst den geprüften Pfad.
+  function knownProjectFromQuery(url: URL, res: ServerResponse): string | null {
+    return checkKnownProject(url.searchParams.get("project") ?? "", res);
+  }
+
+  // Dasselbe für die POST-Endpunkte, die project im Body tragen.
+  function knownProjectFromBody(body: unknown, res: ServerResponse): string | null {
+    return checkKnownProject((body as { project?: string }).project ?? "", res);
+  }
+
+  function checkKnownProject(project: string, res: ServerResponse): string | null {
+    if (!project) {
+      sendJson(res, 400, { error: "project fehlt" });
+      return null;
+    }
+    if (!isKnownProject(project)) {
+      sendJson(res, 400, { error: "unbekanntes Projekt" });
+      return null;
+    }
+    return project;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : WEB_DEFAULT_PORT;
@@ -341,9 +366,8 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Git-Tab Slice 2: volle Branch-Historie EINES Projekts live (aufklappbare
     // Karte). Eigenes Budget in collectGitLog (nicht die 300-ms-Hook-Grenze).
     if (req.method === "GET" && url.pathname === "/api/git-log") {
-      const project = url.searchParams.get("project") ?? "";
-      if (!project) return sendJson(res, 400, { error: "project fehlt" });
-      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const project = knownProjectFromQuery(url, res);
+      if (project === null) return;
       const limitRaw = Number(url.searchParams.get("limit"));
       const log = collectGitLog(project, {
         limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 30,
@@ -355,9 +379,8 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Auto-Snapshots (?snapshots=1). Nicht paginierbar — die Lane-Zuweisung
     // hängt am ganzen Fenster; "mehr laden" ruft mit größerem limit neu auf.
     if (req.method === "GET" && url.pathname === "/api/git-graph") {
-      const project = url.searchParams.get("project") ?? "";
-      if (!project) return sendJson(res, 400, { error: "project fehlt" });
-      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const project = knownProjectFromQuery(url, res);
+      if (project === null) return;
       const limitRaw = Number(url.searchParams.get("limit"));
       const graph = collectGitGraph(project, {
         limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 200,
@@ -365,6 +388,16 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       });
       if (!graph) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
       return sendJson(res, 200, graph);
+    }
+    // Ship-Tab ("Live") Slice 1: lokale Roh-Signale (Deploy-Ziel/Gate) EINES
+    // Projekts. Kein Netz, keine Ausführung — nur eine feste Datei-Allowlist im
+    // Wurzelverzeichnis. Klassifikation passiert clientseitig in shipplan.ts.
+    if (req.method === "GET" && url.pathname === "/api/ship") {
+      const project = knownProjectFromQuery(url, res);
+      if (project === null) return;
+      const signals = collectShipSignals(project);
+      if (!signals) return sendJson(res, 404, { error: "Projektverzeichnis nicht gefunden" });
+      return sendJson(res, 200, signals);
     }
     // Verlauf (Phase 5): Session-Liste + Raw-Turns einer Session.
     if (req.method === "GET" && url.pathname === "/api/sessions") {
@@ -630,9 +663,8 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // wird bewusst nicht persistiert (Schema-Freeze; veraltet mit jedem push).
     // Nur bekannte Projekte (turns ∪ items) — nie beliebige Pfade shellen.
     if (url.pathname === "/api/git-refresh") {
-      const project = (body as { project?: string }).project ?? "";
-      if (!project) return sendJson(res, 400, { error: "project fehlt" });
-      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const project = knownProjectFromBody(body, res);
+      if (project === null) return;
       const state = collectGitState(project);
       if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
       store.upsertGitState(state);
@@ -649,9 +681,8 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Client) und als DATEN an den Assist gefenced. Teilt den Single-Flight-
     // Guard der übrigen LLM-Läufe. FLÜCHTIG: nichts wird persistiert.
     if (url.pathname === "/api/git-assist") {
-      const project = (body as { project?: string }).project ?? "";
-      if (!project) return sendJson(res, 400, { error: "project fehlt" });
-      if (!isKnownProject(project)) return sendJson(res, 400, { error: "unbekanntes Projekt" });
+      const project = knownProjectFromBody(body, res);
+      if (project === null) return;
       const state = collectGitState(project);
       if (!state) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
       const ab = collectAheadBehind(project);
@@ -675,6 +706,50 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
           timeoutMs: webOpts.assistTimeoutMs,
         });
         store.recordEvent({ eventType: "git_assist", projectPath: project, payload: { ok: result.ok } });
+        if (!result.ok) return sendJson(res, 502, { error: result.error });
+        return sendJson(res, 200, { text: result.text });
+      } finally {
+        assistBusy = false;
+      }
+    }
+
+    // Ship-Tab Slice 2: LIVE-CI-Status EINES Projekts über gh. Nur auf
+    // ausdrücklichen Klick (nie Poll, nie Hook), async -> blockiert den Server
+    // nicht. Kein LLM, daher kein assistBusy. Fail-open in einen ehrlichen
+    // Zustand (no-gh/no-auth/…), nie ein falsches "grün".
+    if (url.pathname === "/api/ci-status") {
+      const project = knownProjectFromBody(body, res);
+      if (project === null) return;
+      const headSha = headShaOf(project);
+      if (!headSha) return sendJson(res, 404, { error: "kein Git-Repo (oder git nicht erreichbar)" });
+      const status = await collectCiStatus(project, headSha, collectAheadBehind(project));
+      store.recordEvent({ eventType: "ci_status", projectPath: project, payload: { state: status.state } });
+      return sendJson(res, 200, status);
+    }
+
+    // Ship-Tab Slice 3: Haiku übersetzt einen roten CI-Lauf. runId kommt aus dem
+    // ci-status-Ergebnis (nie Rohtext vom Client -> Number()). Der Fehler-Log
+    // wird serverseitig geholt, gekürzt und als DATEN gefenced. Teilt assistBusy.
+    if (url.pathname === "/api/ci-assist") {
+      const runId = Number((body as { runId?: unknown }).runId);
+      if (!Number.isInteger(runId) || runId <= 0) return sendJson(res, 400, { error: "runId fehlt/ungültig" });
+      const project = knownProjectFromBody(body, res);
+      if (project === null) return;
+      const log = await fetchFailedLog(project, runId);
+      if (!log) return sendJson(res, 404, { error: "kein Fehler-Log gefunden (gh nicht erreichbar?)" });
+      const workflowName = (body as { workflowName?: string }).workflowName;
+      const prefs = parseAssistPrefs(body as { persona?: string; lang?: string });
+      if (assistBusy) return sendJson(res, 429, { error: "Ein KI-Lauf ist bereits aktiv — kurz warten." });
+      assistBusy = true;
+      try {
+        const result = await runCiAssist({
+          logExcerpt: log,
+          workflowName,
+          ...prefs,
+          claudeCmd: webOpts.assistCmd,
+          timeoutMs: webOpts.assistTimeoutMs,
+        });
+        store.recordEvent({ eventType: "ci_assist", projectPath: project, payload: { ok: result.ok } });
         if (!result.ok) return sendJson(res, 502, { error: result.error });
         return sendJson(res, 200, { text: result.text });
       } finally {

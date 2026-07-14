@@ -531,6 +531,65 @@ describe("Deep-Link- und Viewer-Endpunkte (Inbox-Rework 09.07.)", () => {
     expect((await fetch(url("/api/git-log?project=c:/nix"))).status).toBe(400);
     expect((await fetch(url("/api/git-graph?project=c:/nix"))).status).toBe(400);
   });
+
+  it("Ship-Tab: /api/ship liefert lokale Deploy-/Gate-Signale eines Projekts", async () => {
+    const proj = join(ts.dir, "ship-repo");
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, "vercel.json"), "{}", "utf8");
+    writeFileSync(join(proj, "package.json"), JSON.stringify({ scripts: { build: "x", test: "y" } }), "utf8");
+    ts.store.insertTurn({
+      uuid: "t-ship", sessionId: "s-ship", projectPath: proj,
+      role: "user", content: "ship", timestamp: new Date().toISOString(),
+    });
+    const p = proj.replace(/\\/g, "/").replace(/^([A-Z]):/, (m) => m.toLowerCase());
+
+    const r = await fetch(url(`/api/ship?project=${encodeURIComponent(p)}`));
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { files: string[]; npmScripts: string[]; deployWorkflow: boolean };
+    expect(body.files).toContain("vercel.json");
+    expect(body.files).toContain("package.json");
+    expect(body.npmScripts.sort()).toEqual(["build", "test"]);
+    expect(body.deployWorkflow).toBe(false);
+
+    // Unbekanntes Projekt wird nie gelesen.
+    expect((await fetch(url("/api/ship?project=c:/nix"))).status).toBe(400);
+  });
+
+  it("Ship-Tab Slice 2/3: /api/ci-status degradiert ehrlich; ci-assist prüft runId", async () => {
+    // Mini-Repo OHNE Remote als erfasstes Projekt: unabhängig von gh-Präsenz
+    // liefert ci-status einen gültigen Zustand (no-gh/no-remote/…), nie 500.
+    const repo = join(ts.dir, "ci-repo");
+    mkdirSync(repo, { recursive: true });
+    const run = (args: string[]): string => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+    run(["init", "-q"]);
+    run(["config", "user.email", "t@example.com"]);
+    run(["config", "user.name", "t"]);
+    writeFileSync(join(repo, "a.txt"), "x", "utf8");
+    run(["add", "."]);
+    run(["commit", "-q", "-m", "c"]);
+    ts.store.insertTurn({
+      uuid: "t-ci", sessionId: "s-ci", projectPath: repo,
+      role: "user", content: "ci", timestamp: new Date().toISOString(),
+    });
+    const p = repo.replace(/\\/g, "/").replace(/^([A-Z]):/, (m) => m.toLowerCase());
+    const post = (path: string, b: unknown) =>
+      fetch(url(path), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+        body: JSON.stringify(b),
+      });
+
+    const ci = await post("/api/ci-status", { project: p });
+    expect(ci.status).toBe(200);
+    const body = (await ci.json()) as { state: string; headSha: string };
+    expect(typeof body.state).toBe("string");
+    expect(body.headSha.length).toBeGreaterThan(0);
+
+    // ci-assist: harte Validierung von runId und Projekt (kein gh-Aufruf nötig).
+    expect((await post("/api/ci-assist", { project: p })).status).toBe(400); // runId fehlt
+    expect((await post("/api/ci-assist", { project: p, runId: 0 })).status).toBe(400);
+    expect((await post("/api/ci-status", { project: "c:/nix" })).status).toBe(400);
+  });
 });
 
 // Setup-Panel + Endpunkte: hier NUR die nebenwirkungsfreie Verdrahtung (Panel-

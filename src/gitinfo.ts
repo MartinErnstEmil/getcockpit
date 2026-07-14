@@ -16,13 +16,25 @@ const GIT_LIVE_TIMEOUT_MS = 5000;
 // (einzeiligen) Commit-Subject auf — anders als ein Leerzeichen.
 const US = "\x1f";
 
-function git(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): string {
+// Exportiert, damit andere Best-effort-Leser (ciinfo.ts) denselben no-shell-
+// Runner nutzen statt execFileSync neu zu buchstabieren.
+export function git(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
     timeout: timeoutMs,
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
+}
+
+// Nur die HEAD-Sha (ein Spawn) — für Aufrufer, die den vollen collectGitState
+// (4 Spawns, inkl. teurem status --porcelain) nicht brauchen. null = kein Repo.
+export function headShaOf(cwd: string): string | null {
+  try {
+    return git(cwd, ["rev-parse", "HEAD"]) || null;
+  } catch {
+    return null;
+  }
 }
 
 // Null = kein Git-Repo / git fehlt / Budget gerissen — der Aufrufer lässt die

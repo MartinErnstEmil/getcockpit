@@ -20,6 +20,8 @@ import { extractToken, stripTokenParam } from "../spa/src/lib/token";
 import { gitAdvisoryVisible, sessionPromptGitRule } from "../spa/src/lib/gitmode";
 import { deriveGitActions } from "../spa/src/lib/gitactions";
 import { computeGraph, type GraphCommit } from "../spa/src/lib/gitgraph";
+import { deriveShipPlan } from "../spa/src/lib/shipplan";
+import { MARKER_FILES } from "../src/shipinfo.js";
 import {
   parseOptionLine,
   isSelected,
@@ -161,6 +163,71 @@ describe("Commit-Graph Lane-Zuweisung (computeGraph, reine Funktion)", () => {
     expect(sEdge.toSha).toBe("b");
     const bLane = graph.nodes.find((n) => n.sha === "b")!.lane;
     expect(sEdge.toLane).toBe(bLane);
+  });
+});
+
+describe("Ship-Plan Ableitung (deriveShipPlan, reine Funktion)", () => {
+  const sig = (files: string[], npmScripts: string[] = [], deployWorkflow = false) => ({ files, npmScripts, deployWorkflow });
+
+  it("Vercel: benanntes Ziel, push-to-deploy, Kandidaten-Kommando", () => {
+    const plan = deriveShipPlan(sig(["vercel.json"]));
+    expect(plan.targets.map((t) => t.name)).toEqual(["Vercel"]);
+    expect(plan.targets[0]!.pushToDeploy).toBe(true);
+    expect(plan.targets[0]!.command).toBe("vercel --prod");
+  });
+
+  it("Fly.io: Kommando-Deploy (nicht push-to-deploy)", () => {
+    const plan = deriveShipPlan(sig(["fly.toml"]));
+    expect(plan.targets[0]!.name).toBe("Fly.io");
+    expect(plan.targets[0]!.pushToDeploy).toBe(false);
+    expect(plan.targets[0]!.command).toBe("fly deploy");
+  });
+
+  it("mehrdeutige Signale werden NUR ohne benanntes Ziel gezeigt", () => {
+    // Dockerfile allein -> Container (Ziel offen), kein Kommando.
+    const only = deriveShipPlan(sig(["Dockerfile"]));
+    expect(only.targets[0]!.name).toBe("Container (Ziel offen)");
+    expect(only.targets[0]!.command).toBeNull();
+    // Dockerfile + Vercel -> nur Vercel behauptet, kein Container-Fallback.
+    const both = deriveShipPlan(sig(["Dockerfile", "vercel.json"]));
+    expect(both.targets.map((t) => t.name)).toEqual(["Vercel"]);
+  });
+
+  it("Procfile bleibt mehrdeutig (kein Anbieter behauptet, kein Kommando)", () => {
+    const plan = deriveShipPlan(sig(["Procfile"]));
+    expect(plan.targets[0]!.command).toBeNull();
+    expect(plan.targets[0]!.name).toContain("Procfile");
+  });
+
+  it("kein Ziel-Signal -> leere Zielliste (Empty-State in der UI)", () => {
+    expect(deriveShipPlan(sig(["package.json"])).targets).toEqual([]);
+  });
+
+  it("node-Gate baut nur aus vorhandenen Skripten, test nutzt 'npm test'", () => {
+    const plan = deriveShipPlan(sig(["package.json"], ["build", "test", "dev"]));
+    expect(plan.gate.command).toBe("npm test && npm run build");
+  });
+
+  it("Nicht-npm-Stacks bekommen das kanonische Gate-Kommando", () => {
+    expect(deriveShipPlan(sig(["go.mod"])).gate.command).toBe("go build ./... && go test ./...");
+    expect(deriveShipPlan(sig(["Cargo.toml"])).gate.command).toBe("cargo build && cargo test");
+    expect(deriveShipPlan(sig(["pyproject.toml"])).gate.command).toBe("pytest");
+  });
+
+  it("kein erkennbares Gate -> command null, aber immer ein Session-Prompt", () => {
+    const g = deriveShipPlan(sig([])).gate;
+    expect(g.command).toBeNull();
+    expect(g.sessionPrompt.length).toBeGreaterThan(0);
+  });
+
+  it("jeder Server-Marker wird vom Client-Klassifikator verstanden (kein Split-Brain)", () => {
+    // Absichert gegen Drift: ein in shipinfo.ts gemeldeter Marker, den shipplan.ts
+    // nicht kennt, wäre stille tote Kopplung. package.json braucht ein Skript für
+    // ein Gate; alle anderen Marker liefern für sich ein Ziel oder ein Gate.
+    for (const m of MARKER_FILES) {
+      const plan = deriveShipPlan({ files: [m], npmScripts: ["test"], deployWorkflow: false });
+      expect(plan.targets.length > 0 || plan.gate.command !== null, `Marker ${m} wird ignoriert`).toBe(true);
+    }
   });
 });
 

@@ -14,8 +14,10 @@ import type {
   FileView,
   GitGraphResponse,
   GitLogResponse,
+  CiStatus,
   GitRefreshResult,
   GitStateRow,
+  ShipSignals,
   Item,
   ProjectAdmin,
   ReportDay,
@@ -504,5 +506,31 @@ export function useGitAssist() {
   return useMutation({
     mutationFn: (v: { project: string }) =>
       apiPost<{ text: string }>("/api/git-assist", { ...v, persona: getExpertLevel(), lang: getLocale() }),
+  });
+}
+
+// Ship-Tab ("Live") Slice 1: lokale Deploy-/Gate-Signale EINES Projekts, erst
+// bei aufgeklappter Karte geladen. Kein Netz serverseitig — nur Datei-Checks.
+export function useShip(project: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["ship", project],
+    enabled: enabled && project !== null && project !== "",
+    queryFn: () => apiFetch<ShipSignals>(`/api/ship?project=${encodeURIComponent(project ?? "")}`),
+  });
+}
+
+// Slice 2: Live-CI-Status via gh — NUR auf ausdrücklichen Klick (Mutation, nie
+// Poll), da es ins Netz geht und den gh-Login des Nutzers nutzt.
+export function useCiStatus() {
+  return useMutation({
+    mutationFn: (v: { project: string }) => apiPost<CiStatus>("/api/ci-status", v),
+  });
+}
+
+// Slice 3: Haiku übersetzt einen roten Lauf; persona/lang aus den Einstellungen.
+export function useCiAssist() {
+  return useMutation({
+    mutationFn: (v: { project: string; runId: number; workflowName?: string }) =>
+      apiPost<{ text: string }>("/api/ci-assist", { ...v, persona: getExpertLevel(), lang: getLocale() }),
   });
 }
