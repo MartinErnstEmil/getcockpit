@@ -7,6 +7,7 @@ import { useScopedStatus, useScopedItems } from "@/lib/useScopedData";
 import { useBrief, useDecisions } from "@/api/queries";
 import { ErrorBox } from "@/components/StateView";
 import EmptyState from "@/components/EmptyState";
+import AiTroubleshoot from "@/components/AiTroubleshoot";
 import { ageText, shortName } from "@/lib/utils";
 import { sessionPromptGitRule } from "@/lib/gitmode";
 import type { StatusBrief } from "@/api/types";
@@ -229,12 +230,11 @@ function ProjectBriefing({ project, keep }: { project: string; keep: (p: string 
         {briefOut && (
           <>
             {briefOut.mode === "raw" && (
-              <div className="mt-2 border-l-4 border-warn bg-panel px-3 py-2 text-xs text-ink-2">
-                Claude nicht erreichbar ({briefOut.degradedBecause ?? "unbekannt"}) — unten die ungeglätteten Rohdaten.
-                Was du tun kannst: Claude Code installieren und einmal <code className="font-mono">claude</code> im
-                Terminal starten (einloggen); <code className="font-mono">cockpit doctor</code> prüft es. Danach hier
-                einfach „Neu zusammenfassen".
-              </div>
+              <AiTroubleshoot
+                reason={briefOut.degradedBecause}
+                retrying={brief.isPending}
+                onRetry={() => brief.mutate({ project }, { onSuccess: setBriefOut })}
+              />
             )}
             <pre className="mt-2 max-w-[90ch] whitespace-pre-wrap text-sm leading-relaxed text-ink-2">{briefOut.report}</pre>
           </>

@@ -142,6 +142,15 @@ export interface UpdateInfo {
   updateAvailable: boolean;
 }
 
+// KI-Gesundheit (GET /api/ai-health): Diagnose bei Briefing/Assist-Timeout.
+export interface AiHealth {
+  claudeInstalled: boolean;
+  claudeVersion: string | null;
+  runningSessions: number;
+  staleSessions: number;
+  staleThresholdHours: number;
+}
+
 export interface DecisionEntry {
   id: string;
   type: string;

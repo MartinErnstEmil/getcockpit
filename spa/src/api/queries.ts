@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "./client";
 import type {
+  AiHealth,
   AssistKind,
   BudgetCheckResult,
   ComposerApplyResult,
@@ -457,6 +458,24 @@ export function useDeliverySelftest() {
 export function useBrief() {
   return useMutation({
     mutationFn: (v: { project: string }) => apiPost<StatusBrief>("/api/brief", v),
+  });
+}
+
+// KI-Gesundheit: Diagnose bei Timeout (nur laden, wenn der Panel sichtbar ist).
+export function useAiHealth(enabled: boolean) {
+  return useQuery({
+    queryKey: ["ai-health"],
+    enabled,
+    queryFn: () => apiFetch<AiHealth>("/api/ai-health"),
+  });
+}
+
+// Alte (>= 18 h laufende) claude-Sitzungen beenden (nutzer-bestätigt).
+export function useTerminateStale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<{ terminated: number }>("/api/ai-terminate-stale", { confirm: true }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["ai-health"] }),
   });
 }
 

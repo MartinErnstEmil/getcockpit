@@ -20,6 +20,7 @@ import { runDeliverySelftest } from "./selftest.js";
 import { collectAheadBehind, collectGitGraph, collectGitLog, collectGitState, collectLastSnapshot, headShaOf } from "./gitinfo.js";
 import { collectShipSignals } from "./shipinfo.js";
 import { collectCiStatus, fetchFailedLog } from "./ciinfo.js";
+import { getAiHealth, terminateStaleClaude } from "./aihealth.js";
 import { cmdDoctor, enableAllHooks, hooksGloballyDisabled } from "./lifecycle.js";
 import { applyLegacyRemoval, runSetup } from "./setup.js";
 import { setupPageHtml } from "./setuppage.js";
@@ -342,6 +343,11 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
     // Update-Verfügbarkeit (nicht-blockierend, fail-open). Auch von der SPA nutzbar.
     if (req.method === "GET" && url.pathname === "/api/update") {
       return sendJson(res, 200, await checkForUpdate());
+    }
+    // KI-Gesundheit (Briefing/Assist-Timeout-Diagnose): ist claude erreichbar,
+    // und stauen sich alte Sitzungen? Best-effort, auf Abruf.
+    if (req.method === "GET" && url.pathname === "/api/ai-health") {
+      return sendJson(res, 200, getAiHealth());
     }
     if (req.method === "GET" && url.pathname === "/api/status") {
       const view = portfolioView(store, {
@@ -835,6 +841,18 @@ export function createWebServer(store: Store, token: string, webOpts: WebOptions
       const result = enableAllHooks();
       doctorCache = null; // Banner/Doctor sofort aktualisieren
       store.recordEvent({ eventType: "hooks_enable", payload: { changed: result.changed } });
+      return sendJson(res, 200, result);
+    }
+
+    // KI-Gesundheit: die seit >= 18 h laufenden `claude`-Sitzungen beenden
+    // (nutzer-initiiert). Doppelte Bestätigung wie project-delete: der Client
+    // zeigt einen Bestätigen-Schritt, der Server verlangt das confirm-Flag.
+    if (url.pathname === "/api/ai-terminate-stale") {
+      if ((body as { confirm?: boolean }).confirm !== true) {
+        return sendJson(res, 400, { error: "confirm erforderlich" });
+      }
+      const result = terminateStaleClaude();
+      store.recordEvent({ eventType: "ai_terminate_stale", payload: result });
       return sendJson(res, 200, result);
     }
 
