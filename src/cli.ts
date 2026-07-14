@@ -7,6 +7,8 @@ import { createInterface } from "node:readline/promises";
 import { COCKPIT_VERSION } from "./index.js";
 import { backfill, defaultProjectsDir } from "./backfill.js";
 import { cmdDoctor, cmdInit, cmdPurge, cmdUninstall } from "./lifecycle.js";
+import { applyLegacyRemoval, runSetup, type SetupReport } from "./setup.js";
+import { defaultSettingsPath, legacyHookKey } from "./settings.js";
 import { resolveDbPath } from "./paths.js";
 import { parseSince, runStandup } from "./standup.js";
 import { Store, type ItemFilter } from "./store.js";
@@ -29,6 +31,19 @@ function fail(message: string): void {
 
 function shortDate(iso: string): string {
   return iso.slice(0, 10);
+}
+
+function printSetupReport(report: SetupReport): void {
+  for (const s of report.stages) {
+    const mark = s.status === "ok" ? "OK  " : s.status === "warn" ? "WARN" : "FAIL";
+    console.log(`${mark} [${s.code}] ${s.title}`);
+    if (s.status !== "ok" && s.fix) console.log(`       Fix: ${s.fix}`);
+  }
+  if (report.legacy.length > 0) {
+    console.log("\nLegacy-Hooks (mit --remove-legacy entfernen):");
+    for (const l of report.legacy) console.log(`  - ${l.event}: ${l.command}  [${l.marker}]`);
+  }
+  console.log(`\nLog: ${report.logPath}`);
 }
 
 const program = new Command();
@@ -223,6 +238,27 @@ program
     }
     if (checks.some((c) => !c.ok)) process.exitCode = 1;
     else console.log("\nAlles bereit. Oberfläche öffnen: cockpit web");
+  });
+
+program
+  .command("setup")
+  .description("Geordnete Einrichtung prüfen und selbst heilen (Legacy, Backend, Hooks, Frontend, Test)")
+  .option("--settings <pfad>", "abweichende settings.json (deaktiviert MCP-Spawns)")
+  .option("--web-root <dir>", "abweichende SPA-Wurzel (Default: dist/web neben der CLI)")
+  .option("--remove-legacy", "erkannte Legacy-Hooks (smriti/cola) entfernen — sonst nur anzeigen")
+  .action((opts) => {
+    const report = runSetup({
+      settingsPath: opts.settings,
+      webRoot: opts.webRoot,
+      fileBlocker: opts.settings === undefined,
+    });
+    printSetupReport(report);
+    if (report.legacy.length > 0 && opts.removeLegacy) {
+      const keys = report.legacy.map((l) => legacyHookKey(l.event, l.command));
+      const { removed } = applyLegacyRemoval(opts.settings ?? defaultSettingsPath(), keys);
+      console.log(`\nLegacy-Hooks entfernt: ${removed}`);
+    }
+    if (report.hardFailed) process.exitCode = 1;
   });
 
 program

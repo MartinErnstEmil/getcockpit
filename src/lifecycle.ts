@@ -113,7 +113,7 @@ export async function cmdInit(opts: InitOptions = {}): Promise<InitReport> {
   };
 }
 
-function installHookBundle(): string {
+export function installHookBundle(): string {
   const src = bundledHookSource();
   if (!existsSync(src)) {
     throw new Error(`Hook-Bundle fehlt (${src}) — Paket unvollständig gebaut?`);
@@ -124,7 +124,43 @@ function installHookBundle(): string {
   return dest;
 }
 
-function registerMcp(out: (line: string) => void): "registered" | "failed" {
+// Version aus dem Banner „// cockpit-hook-version: X" (build-hooks.mjs). Liest
+// nur den Dateikopf — das Bundle ist einige KB groß, ein Prefix genügt.
+function bundleVersion(file: string): string | null {
+  if (!existsSync(file)) return null;
+  const head = readFileSync(file, "utf8").slice(0, 200);
+  return head.match(/cockpit-hook-version:\s*(\S+)/)?.[1] ?? null;
+}
+
+export function installedHookVersion(): string | null {
+  return bundleVersion(hookBundleInstallPath());
+}
+
+export function bundledHookVersion(): string | null {
+  return bundleVersion(bundledHookSource());
+}
+
+export interface HookRefresh {
+  refreshed: boolean;
+  installed: string | null;
+  bundled: string | null;
+  dest: string;
+}
+
+// Selbstheilung (App-Start): kopiert das mitgelieferte Bundle nur, wenn das
+// installierte fehlt oder eine ANDERE Version trägt — idempotent, kein Schreiben
+// im Normalfall. Schließt den stale-Bundle-Fund (i-bb48f7ba7b): ein Upgrade der
+// App aktualisierte den Hook bisher nie ohne `cockpit init`.
+export function refreshHookBundleIfStale(): HookRefresh {
+  const dest = hookBundleInstallPath();
+  const installed = installedHookVersion();
+  const bundled = bundledHookVersion();
+  const stale = !existsSync(dest) || installed !== bundled;
+  if (stale) installHookBundle();
+  return { refreshed: stale, installed, bundled, dest };
+}
+
+export function registerMcp(out: (line: string) => void): "registered" | "failed" {
   const res = spawnSync("claude", mcpRegisterArgs(), {
     encoding: "utf8",
     shell: process.platform === "win32",
@@ -186,7 +222,12 @@ export interface DoctorCheck {
 // (claude-Binary, MCP-Registrierung) laufen nur gegen die ECHTE Installation
 // (kein settingsPath-Override) — Fixture-Läufe und der Web-Hot-Path bleiben
 // schnell und deterministisch (gleiche D5-Disziplin wie init).
-export function cmdDoctor(opts: { settingsPath?: string; spawnChecks?: boolean } = {}): DoctorCheck[] {
+// deliveryChain (Setup-Verify): der Zustell-Selbsttest spawnt das Hook-Bundle
+// und dauert kalt ~17 s — auf dem App-Start-Pfad zu teuer. Default folgt
+// spawnChecks (Rückwärtskompatibilität für CLI-doctor); Setup schaltet ihn ab.
+export function cmdDoctor(
+  opts: { settingsPath?: string; spawnChecks?: boolean; deliveryChain?: boolean } = {},
+): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const [major, minor] = process.versions.node.split(".").map(Number);
   checks.push({
@@ -208,7 +249,7 @@ export function cmdDoctor(opts: { settingsPath?: string; spawnChecks?: boolean }
   if (opts.spawnChecks ?? opts.settingsPath === undefined) {
     checks.push(checkClaudeBinary());
     checks.push(checkMcpRegistered());
-    checks.push(checkDeliveryChain());
+    if (opts.deliveryChain ?? true) checks.push(checkDeliveryChain());
   }
   return checks;
 }

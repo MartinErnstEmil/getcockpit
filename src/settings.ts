@@ -10,6 +10,19 @@ import { dirname, join } from "node:path";
 export const HOOK_MARKER = "cockpit-hook.cjs";
 export const HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart"] as const;
 
+// Bekannte Vorgänger-Produkte derselben Familie (Setup „Legacy entfernen"):
+// deren Hook-Bundles dürfen nie neben cockpit weiterlaufen (smriti-Vorfall
+// 09.07. — stillgelegtes smriti hängte wiederholt eigene Hooks ein). Nur
+// GEZIELT diese Marker gelten als Legacy — fremde, unbekannte Hooks des Nutzers
+// werden NIE angetastet oder auch nur zur Entfernung vorgeschlagen.
+export const LEGACY_HOOK_MARKERS = [
+  "smriti",
+  "cola2-hook",
+  "cola-hook",
+  "garfield-hook",
+  "context-engine",
+] as const;
+
 export interface HookEntry {
   matcher?: string;
   hooks?: Array<{ type: string; command: string }>;
@@ -45,8 +58,70 @@ export function saveSettings(path: string, settings: ClaudeSettings): void {
   writeFileSync(path, serializeSettings(settings), "utf8");
 }
 
-function isCockpitHook(entry: HookEntry): boolean {
+export function isCockpitHook(entry: HookEntry): boolean {
   return (entry.hooks ?? []).some((h) => h.command?.includes(HOOK_MARKER));
+}
+
+export interface LegacyHook {
+  event: string;
+  command: string;
+  marker: string;
+}
+
+// Stabiler Schlüssel für die Auswahl in Panel/CLI: Ereignis + exaktes Kommando.
+// Der Index eignet sich nicht — er verschiebt sich, sobald ein Eintrag entfällt.
+export function legacyHookKey(event: string, command: string): string {
+  return `${event}::${command}`;
+}
+
+// Listet ausschließlich Hooks bekannter Vorgänger-Produkte (LEGACY_HOOK_MARKERS)
+// — cockpit-eigene und unbekannte Fremd-Hooks bleiben außen vor.
+export function listLegacyHooks(settings: ClaudeSettings): LegacyHook[] {
+  const out: LegacyHook[] = [];
+  for (const [event, entries] of Object.entries(settings.hooks ?? {})) {
+    for (const entry of entries ?? []) {
+      if (isCockpitHook(entry)) continue;
+      for (const h of entry.hooks ?? []) {
+        const marker = LEGACY_HOOK_MARKERS.find((m) => h.command?.includes(m));
+        if (marker) out.push({ event, command: h.command, marker });
+      }
+    }
+  }
+  return out;
+}
+
+// Entfernt NUR ausgewählte Legacy-Hooks (keys aus legacyHookKey); cockpit- und
+// unbekannte Fremd-Hooks bleiben byte-identisch. Leere Strukturen fallen weg.
+export function removeLegacyHooks(
+  settings: ClaudeSettings,
+  keys: string[],
+): { settings: ClaudeSettings; removed: number } {
+  const selected = new Set(keys);
+  const out: ClaudeSettings = structuredClone(settings);
+  let removed = 0;
+  for (const [event, entries] of Object.entries(out.hooks ?? {})) {
+    if (!entries) continue;
+    const kept: HookEntry[] = [];
+    for (const entry of entries) {
+      if (isCockpitHook(entry)) {
+        kept.push(entry);
+        continue;
+      }
+      const hooks = (entry.hooks ?? []).filter((h) => {
+        const isLegacy = LEGACY_HOOK_MARKERS.some((m) => h.command?.includes(m));
+        if (isLegacy && selected.has(legacyHookKey(event, h.command))) {
+          removed++;
+          return false;
+        }
+        return true;
+      });
+      if (hooks.length > 0) kept.push({ ...entry, hooks });
+    }
+    if (kept.length === 0) delete out.hooks![event];
+    else out.hooks![event] = kept;
+  }
+  if (out.hooks && Object.keys(out.hooks).length === 0) delete out.hooks;
+  return { settings: out, removed };
 }
 
 // Fügt die drei cockpit-Hook-Einträge hinzu; vorhandene cockpit-Einträge werden
