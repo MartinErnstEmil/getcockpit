@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Eye, EyeOff, HelpCircle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, EyeOff, HelpCircle, History, Info } from "lucide-react";
 import { useScope } from "@/lib/useScope";
 import {
   useEnv,
@@ -201,7 +201,7 @@ function ScanPanel({ project }: { project: EnvProjectView }) {
                 {r.why && <span className="block"><strong>Warum:</strong> {r.why}</span>}
                 {r.how && <span className="block"><strong>Wie:</strong> {r.how}</span>}
                 {r.what && <span className="block"><strong>Was:</strong> {r.what}</span>}
-                {r.link && <a href={safeHref(r.link)} target="_blank" rel="noreferrer noopener" className="block text-accent underline decoration-dotted">{r.link}</a>}
+                {r.link && <a href={safeHref(r.link)} target="_blank" rel="noreferrer noopener" className="block break-all text-accent-text underline underline-offset-2 hover:no-underline">{r.link}</a>}
               </span>
               <button
                 type="button"
@@ -235,7 +235,7 @@ function VarRow({ project, v }: { project: string; v: EnvVarView }) {
   return (
     <div className="border border-line px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm font-semibold">{v.key}=</span>
+        <span className="font-mono text-sm font-semibold">{v.key}<span className="text-ink-2">=</span></span>
         <StatusTag v={v} />
         <div className="ml-auto flex items-center gap-1">
           <input
@@ -257,11 +257,23 @@ function VarRow({ project, v }: { project: string; v: EnvVarView }) {
         </div>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
-        <button type="button" onClick={() => setShowMeta((s) => !s)} className="text-accent underline decoration-dotted">
-          {showMeta ? "Info schließen" : (v.spec ? "warum/wie/was" : "warum/wie/was hinterlegen")}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
+        {/* Sekundäraktionen bewusst leise (Icon + ink-2, Hover hebt an) — der
+            Fokus soll auf Key + Wert-Eingabe liegen, nicht auf grellen Links. */}
+        <button
+          type="button"
+          onClick={() => setShowMeta((s) => !s)}
+          className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-ink-2 transition-colors hover:bg-line/40 hover:text-ink"
+        >
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          {showMeta ? "Info schließen" : v.spec ? "warum/wie/was" : "warum/wie/was hinterlegen"}
         </button>
-        <button type="button" onClick={() => setShowHist((s) => !s)} className="text-ink-2 underline decoration-dotted">
+        <button
+          type="button"
+          onClick={() => setShowHist((s) => !s)}
+          className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-ink-2 transition-colors hover:bg-line/40 hover:text-ink"
+        >
+          <History className="h-3.5 w-3.5 shrink-0" />
           {showHist ? "Verlauf schließen" : "Verlauf"}
         </button>
         {write.isError && <span className="text-crit">{errText(write.error)}</span>}
@@ -271,7 +283,7 @@ function VarRow({ project, v }: { project: string; v: EnvVarView }) {
       {v.spec && !showMeta && (v.spec.why || v.spec.how || v.spec.what || v.spec.serviceLink) && (
         <div className="mt-1 text-xs text-ink-2">
           {v.spec.why && <span className="mr-3"><strong>Warum:</strong> {v.spec.why}</span>}
-          {v.spec.serviceLink && <a href={safeHref(v.spec.serviceLink)} target="_blank" rel="noreferrer noopener" className="text-accent underline decoration-dotted">Service</a>}
+          {v.spec.serviceLink && <a href={safeHref(v.spec.serviceLink)} target="_blank" rel="noreferrer noopener" className="text-accent-text underline underline-offset-2 hover:no-underline">Service</a>}
         </div>
       )}
       {showMeta && <SpecEditor project={project} varKey={v.key} spec={v.spec} onDone={() => setShowMeta(false)} />}
