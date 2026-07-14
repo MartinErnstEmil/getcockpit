@@ -37,18 +37,58 @@
     "test": "npm run build:server && vitest run",
     "typecheck": "tsc --noEmit",
     "typecheck:spa": "npm -w @getcockpit/cockpit-spa run typecheck",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "app:icon": "node electron/make-icon.mjs",
+    "app:rebuild": "electron-rebuild --force --only better-sqlite3",
+    "app:restore": "npm rebuild better-sqlite3",
+    "app:dev": "npm run app:rebuild && electron electron/main.cjs",
+    "app:build": "npm run build && npm run app:rebuild && electron-builder && npm run app:restore"
+  },
+  "build": {
+    "appId": "de.extracode.cockpit",
+    "productName": "Cockpit",
+    "asar": false,
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "files": [
+      "electron/**",
+      "dist/**",
+      "package.json",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme,test,__tests__,tests,powered-test,example,examples}"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "electron/build"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "electron/build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cockpit"
+    }
   },
   "dependencies": {
-    "better-sqlite3": "^12.2.0",
     "@modelcontextprotocol/sdk": "^1.13.0",
+    "better-sqlite3": "^12.2.0",
     "commander": "^14.0.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.5",
+    "png-to-ico": "^3.0.2",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }
